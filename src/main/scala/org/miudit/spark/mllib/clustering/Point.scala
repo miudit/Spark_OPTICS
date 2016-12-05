@@ -1,0 +1,81 @@
+package org.miudit.spark.mllib.clustering
+
+import org.apache.spark.rdd.RDD
+import org.apache.spark.broadcast.Broadcast
+import org.apache.commons.math3.ml.distance.DistanceMeasure
+
+class Point (
+    val coordinates: Array[Double],
+    val pointId: Long = 0,
+    val boxId: Int = 0,
+    val clusterId: Int = 0,
+    var coreDist: Double = Double.MaxValue,
+    var reachDist: Option[Double] = None,
+    var processed: Boolean = false,
+    var noise: Boolean = false ) extends Serializable with Ordered[Point] {
+
+    def this (pt: Point) = this (pt.coordinates, pt.pointId, pt.boxId, pt.clusterId,
+        pt.coreDist, pt.reachDist, pt.processed, pt.noise)
+
+}
+
+class PointSortKey (point: Point) extends Ordered[PointSortKey] with Serializable {
+    val boxId = point.boxId
+    val pointId = point.pointId
+}
+
+class PointIndexer (val numOfPartitions: Int, val currentPartition: Int) {
+
+    val multiplier = computeMultiplier (numOfPartitions)
+    var currentIndex = 0
+
+    def getNextIndex = {
+        currentIndex += 1
+        currentIndex * multiplier + currentPartition
+    }
+
+    def computeMultiplier (numOfPartitions: Int) = {
+        val numOfDigits = Math.floor (java.lang.Math.log10 (numOfPartitions)) + 1
+        Math.round (Math.pow (10, numOfDigits))
+    }
+
+}
+
+object PointIndexer {
+    def addMetadataToPoints (
+            data: RDD[Point],
+            boxes: Broadcast[Iterable[Box]],
+            dimensions: Broadcast[Int],
+            distanceMeasure: DistanceMeasure ): RDD[(PointSortKey, Point)] = {
+
+        val numPartitions = data.partitions.length
+        val origin = new Point (Array.fill (dimensions.value)(0.0))
+
+        data.mapPartitionsWithIndex( (partitionIndex, points) => {
+            val pointIndexer = new PointIndexer (numPartitions, partitionIndex)
+            points.map (pt => {
+                val pointIndex = pointIndexer.getNextIndex
+                val box = boxes.value.find( _.contains(pt) )
+                val distanceFromOrigin = distanceMeasure.compute(pt.coordinates.toArray, origin.coordinates.toArray)
+                val boxId = box match {
+                    case existingBox: Some[Box] => existingBox.get.boxId
+                    case _ => 0 // throw an exception?
+                }
+                val newPoint = new Point (pt.coordinates, pointIndex, boxId, pt.clusterId, pt.coreDist,
+                    pt.reachDist, pt.processed, pt.noise)
+
+                (new PointSortKey (newPoint), newPoint)
+            })
+        })
+
+    }
+}
+
+class MutablePoint (p: Point, val tempPointId: Long) extends Point (p) {
+
+    var tempClusterId: Int = p.clusterId
+
+    def toImmutablePoint: Point = new Point (this.coordinates, this.pointId, this.boxId, this.clusterId,
+        this.coreDist, this.reachDist, this.processed, this.noise)
+
+}
