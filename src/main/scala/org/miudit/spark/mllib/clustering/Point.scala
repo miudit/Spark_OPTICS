@@ -14,14 +14,46 @@ class Point (
     var processed: Boolean = false,
     var noise: Boolean = false ) extends Serializable with Ordered[Point] {
 
+    var isAffected = false
+
     def this (pt: Point) = this (pt.coordinates, pt.pointId, pt.boxId, pt.clusterId,
         pt.coreDist, pt.reachDist, pt.processed, pt.noise)
 
+    override def compare(that: Point): Int = {
+        var result = 0
+        var i = 0
+
+        while (result == 0 && i < coordinates.size) {
+            result = this.coordinates(i).compareTo(that.coordinates(i))
+            i += 1
+        }
+
+        result
+    }
 }
 
 class PointSortKey (point: Point) extends Ordered[PointSortKey] with Serializable {
     val boxId = point.boxId
     val pointId = point.pointId
+
+    override def compare(that: PointSortKey): Int = {
+
+        if (this.boxId > that.boxId) {
+            1
+        }
+        else if (this.boxId < that.boxId) {
+            -1
+        }
+        else if (this.pointId > that.pointId) {
+            1
+        }
+        else if (this.pointId < that.pointId) {
+            -1
+        }
+        else {
+            0
+        }
+    }
 }
 
 class PointIndexer (val numOfPartitions: Int, val currentPartition: Int) {

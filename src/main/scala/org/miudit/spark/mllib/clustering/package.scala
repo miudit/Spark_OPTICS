@@ -4,6 +4,8 @@ import scala.collection.mutable.{ArrayBuffer, PriorityQueue}
 
 package object clustering {
 
+    type PartialClusterOrderingId = Int
+
     type ClusterOrdering = ArrayBuffer[MutablePoint]
 
 }

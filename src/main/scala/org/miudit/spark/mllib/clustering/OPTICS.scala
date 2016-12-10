@@ -1,6 +1,7 @@
 package org.miudit.spark.mllib.clustering
 
 import scala.collection.mutable.{ArrayBuffer, PriorityQueue}
+import scala.util.control.Breaks.{break, breakable}
 import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
 import org.apache.spark.Logging
 import org.apache.spark.rdd.RDD
@@ -34,16 +35,18 @@ class Optics private (
 
         val broadcastBoxes = data.sparkContext.broadcast(partitionedData.boxes)
 
-        val partialClusters = partitionedData.mapPartitionsWithIndex (
+        var partialClusters = partitionedData.mapPartitionsWithIndex (
             (partitionIndex, it) => {
                 val boxes = broadcastBoxes.value
                 val partitionBoundingBox = boxes.find(  _.partitionId == partitionIndex ).get
-                partialClustering(it, partitionBoundingBox).toIterator
+                Vector( (partitionBoundingBox.mergeId, (partialClustering(it, partitionBoundingBox), partitionBoundingBox)) ).toIterator
             },
             preservesPartitioning = true
         )
 
-        val mergedClusters = mergeClusters(partialClusters, partitionedData.boxes)
+        val partitionIdsToMergeIds = partitionedData.boxes.map ( x => (x.partitionId, x.mergeId) ).toMap
+
+        val mergedClusters = mergeClusters(partialClusters, partitionedData.boxes, partitionIdsToMergeIds)
 
         new OpticsModel(mergedClusters, epsilon, minPts)
     }
@@ -74,14 +77,21 @@ class Optics private (
 
         points.values
         .find( p => p.noise )
-        .map( p => clusterOrdering.append(p) )
+        .map(
+            p => {
+                // set all points' processed as false for merging
+                p.processed = false
+                clusterOrdering.append(p)
+            }
+        )
 
         clusterOrdering
     }
 
     private def mergeClusters (
-        partialClusters: RDD[MutablePoint],
-        boxes: Iterable[Box] ): RDD[Point] = {
+        partialClusters: RDD[(Int, (ClusterOrdering, Box))],
+        boxes: Iterable[Box],
+        partitionIdsToMergeIds: Map[Int, Int] ): RDD[ClusterOrdering] = {
 
         /*partialClusters.treeAggregate()(
             seqOp: (org.apache.spark.rdd.RDD.U, org.miudit.spark.mllib.clustering.MutablePoint) => org.apache.spark.rdd.RDD.U,
@@ -89,20 +99,207 @@ class Optics private (
             BoxCalculator.maxTreeLevel
         )*/
 
-        while (partialClusters.getNumPartitions > 1) {
-            partialClusters.mapPartitionsWithIndex(
-                (index, iterator) => {  }
+        //var partitionIdsToMergeIds: Map[Int, Int] = partitionIdsToMergeIds
+
+        var partialClusterOrderings = partialClusters
+
+        while (partialClusterOrderings.getNumPartitions > 1) {
+            partialClusterOrderings = partialClusterOrderings.mapPartitionsWithIndex(
+                (index, iterator) => {
+                    assert( iterator.size > 1, "Bad Partitioning ?" )
+
+                    iterator.map( p => (p._1/10, p._2) )
+                }
+            )
+            .reduceByKey(
+                (p1, p2) => {
+                    ( merge(p1._1, p2._1, p1._2, p2._2),
+                        boxes.find( _.mergeId == p1._2.mergeId ).get )
+                },
+                partialClusterOrderings.getNumPartitions/2
             )
         }
 
-        None
+        partialClusterOrderings.map( co => co._2._1 )
     }
 
     private def merge (
         co1: ClusterOrdering,
-        co2: ClusterOrdering ): ClusterOrdering = {
+        co2: ClusterOrdering,
+        box1: Box,
+        box2: Box ): ClusterOrdering = {
 
-        new ClusterOrdering()
+        val expandedBox1 = box1.expand(epsilon)
+        val expandedBox2 = box2.expand(epsilon)
+
+        var tempId = 0
+        // 全点のprocessedをfalseにリセット
+        val points1 = co1.toIterable.map( p => { p.processed = false; p} )
+        val points2 = co2.toIterable.map( p => { p.processed = false; p} )
+
+        val expandedPoints1 = points1 ++ expandedBox1.overlapPoints(points2)
+        val expandedPoints2 = points2 ++ expandedBox2.overlapPoints(points1)
+
+        val indexer1 = new PartitionIndexer(expandedBox1, expandedPoints1, epsilon, minPts)
+        val indexer2 = new PartitionIndexer(expandedBox2, expandedPoints2, epsilon, minPts)
+
+        markAffectedPoints(indexer1.boxesTree, indexer2.boxesTree)
+
+        // affected pointとしてマークした情報を反映
+        val markedPoints1 = indexer1.points.zip(points1).map( p => {
+            p._2.isAffected = p._1.isAffected
+            p._2
+        } )
+        val markedPoints2= indexer2.points.zip(points2).map( p => {
+            p._2.isAffected = p._1.isAffected
+            p._2
+        } )
+
+        var newClusterOrdering = new ClusterOrdering()
+
+        processClusterOrdering(markedPoints1, markedPoints2, indexer1, co1, newClusterOrdering)
+        processClusterOrdering(markedPoints2, markedPoints1, indexer2, co2, newClusterOrdering)
+
+        newClusterOrdering
+    }
+
+    private def processClusterOrdering (
+        points1: Iterable[MutablePoint],
+        points2: Iterable[MutablePoint],
+        indexer: PartitionIndexer,
+        clusterOrdering: ClusterOrdering,
+        newClusterOrdering: ClusterOrdering): Unit = {
+
+        var priorityQueue = new PriorityQueue[MutablePoint]()(Ordering.by[MutablePoint, Double](_.reachDist.get).reverse)
+
+        while (clusterOrdering.size > 0) {
+            if (!priorityQueue.isEmpty) {
+                val q = priorityQueue.dequeue()
+                process(points1, points2, q, indexer, priorityQueue, newClusterOrdering)
+            }
+            else {
+                breakable(
+                    while (clusterOrdering.size > 0) {
+                        val x = findOneUnprocessedPoint(clusterOrdering).get
+                        if (x.isAffected) {
+                            processAffectedPoint(points1, points2, x, indexer, priorityQueue, newClusterOrdering)
+                            if (!priorityQueue.isEmpty)
+                                break
+                        }
+                    }
+                )
+            }
+        }
+
+        while (!priorityQueue.isEmpty) {
+            val q = priorityQueue.dequeue()
+            process(points1, points2, q, indexer, priorityQueue, newClusterOrdering)
+        }
+
+    }
+
+    private def processAffectedPoint (
+        points1: Iterable[MutablePoint],
+        points2: Iterable[MutablePoint],
+        point: MutablePoint,
+        indexer: PartitionIndexer,
+        priorityQueue: PriorityQueue[MutablePoint],
+        newClusterOrdering: ClusterOrdering ): Unit = {
+
+        val neighbors = indexer.findNeighbors(point, false)
+            .map{ p => p.asInstanceOf[MutablePoint] }
+
+        if (neighbors.size >= minPts) {
+            point.noise = false
+            point.coreDist = calcCoreDist(point, indexer)
+            update(priorityQueue, point, neighbors)
+            point.processed = true
+            newClusterOrdering.append(point)
+        }
+    }
+
+    private def processNonAffectedPoint (
+        points1: Iterable[MutablePoint],
+        points2: Iterable[MutablePoint],
+        point: MutablePoint,
+        indexer: PartitionIndexer,
+        priorityQueue: PriorityQueue[MutablePoint],
+        newClusterOrdering: ClusterOrdering ): Unit = {
+
+        def findPrecedessor ( point: MutablePoint ): Option[MutablePoint] = {
+            indexer.findNeighbors(point, false)
+                .map{ p => p.asInstanceOf[MutablePoint] }
+                .find( p => {
+                    point.reachDist.get == Math.max( point.coreDist, PartitionIndexer.distance(point, p) )
+                } )
+        }
+
+        val successors = indexer.findNeighbors(point, false)
+            .map{ p => p.asInstanceOf[MutablePoint] }
+            .filter( p => { point.pointId == findPrecedessor(p).get.pointId } )
+
+        // predecessorがUNDEFINEDの時targetsがどうなるか
+        val predecessor = Iterable[MutablePoint](findPrecedessor(point).get)
+
+        val targets = successors ++ predecessor
+
+        targets.filter( p => ! p.processed )
+            .map( p => {
+                if ( ! priorityQueue.exists( q => p.pointId == q.pointId ) ) {
+                    val neighbors = indexer.findNeighbors(p, false)
+                    if ( neighbors.size < minPts )
+                        p.reachDist = None
+                    else
+                        p.reachDist = Option( math.max( point.coreDist, PartitionIndexer.distance(p, point) ) )
+                }
+                else if ( math.max( point.coreDist, PartitionIndexer.distance(p, point) ) < p.reachDist.get ) {
+                    p.reachDist = Option( math.max( point.coreDist, PartitionIndexer.distance(p, point) ) )
+                    updatePriorityQueue(priorityQueue, p)
+                }
+            } )
+
+        point.processed = true
+        newClusterOrdering.append(point)
+    }
+
+    private def process (
+        points1: Iterable[MutablePoint],
+        points2: Iterable[MutablePoint],
+        point: MutablePoint,
+        indexer: PartitionIndexer,
+        priorityQueue: PriorityQueue[MutablePoint],
+        newClusterOrdering: ClusterOrdering ): Unit = {
+
+        if (point.isAffected) {
+            processAffectedPoint(points1, points2, point, indexer, priorityQueue, newClusterOrdering)
+        }
+        else {
+            processNonAffectedPoint(points1, points2, point, indexer, priorityQueue, newClusterOrdering)
+        }
+
+    }
+
+    private def markAffectedPoints (
+        root1: BoxTreeNodeWithPoints,
+        root2: BoxTreeNodeWithPoints ): Unit = {
+
+        while ( ! (root1.isLeaf && root2.isLeaf ) ) {
+            if ( root1.box.overlapsWith(root2.box) ) {
+                for (x <- root1.children; y <- root2.children) {
+                    markAffectedPoints(x, y)
+                }
+            }
+        }
+
+        if ( root1.box.overlapsWith(root2.box) ) {
+            for (x <- root1.points; y <- root2.points) {
+                if (PartitionIndexer.distance(x, y) < epsilon) {
+                    x.isAffected = true
+                    y.isAffected = true
+                }
+            }
+        }
+
     }
 
     private def expand (
