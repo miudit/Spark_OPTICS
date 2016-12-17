@@ -4,12 +4,18 @@ import org.apache.commons.math3.ml.distance.{DistanceMeasure, EuclideanDistance}
 import scala.collection.immutable.Vector
 import scala.collection.mutable.{ListBuffer, ArrayBuffer}
 import scala.collection.parallel.ParIterable
+import scala.util.control.Breaks.{break, breakable}
 
 class PartitionIndexer (
     val partitionBox: Box,
     val points: Iterable[MutablePoint],
     val epsilon: Double,
     val minPts: Int ) extends DistanceCalculator with Serializable {
+
+    /*val mostright = points.maxBy(_.coordinates(0))
+    val mostleft = points.minBy(_.coordinates(0))
+    println("MOST RIGHT POINT = (%s, %s)".format(mostright.coordinates(0), mostright.coordinates(1)))
+    println("MOST LEFT POINT = (%s, %s)".format(mostleft.coordinates(0), mostleft.coordinates(1)))*/
 
     val boxesTree = PartitionIndexer.buildRTree(partitionBox, points, epsilon, minPts)
 
@@ -20,21 +26,36 @@ class PartitionIndexer (
         val mbrOfQueryCircle = new Box( queryCircleBounds )
 
         var children = boxesTree.children
-        while (!children(0).isLeaf) {
-            var temp = List[BoxTreeNodeWithPoints]()
-            children.map(
-                child => {
-                    val newChildren = child.children
-                    temp ::: newChildren.filter( node => node.box.overlapsWith(mbrOfQueryCircle) )
-                }
-            )
-            children = temp
-        }
+        breakable(
+            while (!children(0).isLeaf) {
+                //var temp = List[BoxTreeNodeWithPoints]()
+                val newNodes = children.map(
+                    child => {
+                        val newChildren = child.children
+                        //temp ::: newChildren.filter( node => node.box.overlapsWith(mbrOfQueryCircle) )
+                        newChildren.filter( node => node.box.overlapsWith(mbrOfQueryCircle) )
+                    }
+                )
+                .flatMap( x => x )
+                //children = temp
+                children = newNodes
+                if (children.size == 0 )
+                    break
+            }
+        )
 
-        // 得られたリーフノードIterable[BoxTreeNodeWithPoints]の全pointsに対して距離計算して範囲内の点を返す
-        var result = Iterable[Point]()
+        // 得られたリーフノードIterable[BoxTreeNodeWithPoints]の全pointsに対して距離計算して範囲内の点を返す（自分以外）
+        /*var result = Iterable[Point]()
         children.map( child => result ++ child.points )
-        result.filter( p => PartitionIndexer.distance(point, p) <= epsilon & (!p.processed | !onlyUnprocessed) )
+        result.filter( p => PartitionIndexer.distance(point, p) <= epsilon && (!p.processed || !onlyUnprocessed) )*/
+
+        val result = children.map(
+            child => child.points.filter(
+                p => p.pointId != point.pointId && PartitionIndexer.distance(point, p) <= epsilon && (!p.processed || !onlyUnprocessed)
+            )
+        )
+        .flatMap( x => x )
+        .toIterable
 
         result
     }
@@ -43,8 +64,8 @@ class PartitionIndexer (
 
 object PartitionIndexer extends DistanceCalculator {
 
-    private val maxEntries = 100
-    private val minEntries = 50
+    private val maxEntries = 4
+    private val minEntries = 2
 
     /**
     * build R-tree by Sort-Tile-Recursive(STR) algorithm
@@ -52,7 +73,9 @@ object PartitionIndexer extends DistanceCalculator {
     def buildRTree (boundingBox: Box, points: Iterable[MutablePoint], epsilon: Double, minPts: Int): BoxTreeNodeWithPoints = {
         val dimension = boundingBox.bounds.size
         val leafNodes = createLeafNodes(boundingBox, points)
+        //println("size of leafNodes = %s".format(leafNodes.size))
         var nodes = leafNodes
+        //nodes.foreach( node => println("points size of node = %s".format(node.points.size)) )
         while (nodes.size > maxEntries) {
             val nodeGroups = recursivePackBoxes(Vector(nodes), 0, dimension)
             val newNodes = nodeGroups.map(
@@ -65,6 +88,7 @@ object PartitionIndexer extends DistanceCalculator {
             ).toList
             nodes = newNodes
         }
+        //println("hee")
         val root = new BoxTreeNodeWithPoints(boundingBox)
         root.children = nodes
         root
@@ -77,24 +101,36 @@ object PartitionIndexer extends DistanceCalculator {
         pointGroups.map( p => { new BoxTreeNodeWithPoints(createMBR(p, dimension), p, true)} ).toList
     }
 
+    // method for creating leaf nodes
     def recursiveSplit (pointsVec: Vector[Iterable[MutablePoint]], dimIndex: Int, dimension: Int): Vector[Iterable[MutablePoint]] = {
         var temp = Vector[Iterable[MutablePoint]]()
+        //println("vecSize = %s".format(pointsVec.size))
         pointsVec.map(
             points => {
+                //println("pointsSize = %s".format(points.size))
                 val numOfPoints = points.size
                 val numOfPages = Math.ceil(numOfPoints.toDouble / maxEntries.toDouble).toInt
+                //println("numofpages = %s".format(numOfPages))
                 val numOfSplitAlongAxis = Math.ceil(Math.pow(numOfPages.toDouble, (1.0/(dimension-dimIndex).toDouble))).toInt
+                //println("numofsplitalongaxis = %s".format(numOfSplitAlongAxis))
                 val sorted = points.toList.sortWith(
                     (p1, p2) => p1.coordinates(dimIndex) < p2.coordinates(dimIndex)
                 )
-                val sliced = sorted.sliding(numOfSplitAlongAxis, numOfSplitAlongAxis).toVector
+                val slideNum = Math.ceil(sorted.size.toDouble / numOfSplitAlongAxis.toDouble).toInt
+                //val sliced = sorted.sliding(numOfSplitAlongAxis, numOfSplitAlongAxis).toVector
+                val sliced = sorted.sliding(slideNum, slideNum).toVector
+                //println("slicedSize = %s".format(sliced.size))
                 temp ++= sliced
             }
         )
-        if (dimIndex+1 != dimension)
+        if (dimIndex+1 != dimension){
+            //println("split!")
             recursiveSplit(temp, dimIndex+1, dimension)
-        else
+        }
+        else {
+            //println("temp size = %s".format(temp.size))
             temp
+        }
     }
 
     def recursivePackBoxes (nodesVec: Vector[List[BoxTreeNodeWithPoints]], dimIndex: Int, dimension: Int): Vector[List[BoxTreeNodeWithPoints]] = {
@@ -107,7 +143,9 @@ object PartitionIndexer extends DistanceCalculator {
                 val sorted = nodes.toList.sortWith(
                     (n1, n2) => n1.box.centerPoint.coordinates(dimIndex) < n2.box.centerPoint.coordinates(dimIndex)
                 )
-                val sliced = sorted.sliding(numOfSplitAlongAxis, numOfSplitAlongAxis).toVector
+                val slideNum = Math.ceil(sorted.size.toDouble / numOfSplitAlongAxis.toDouble).toInt
+                //val sliced = sorted.sliding(numOfSplitAlongAxis, numOfSplitAlongAxis).toVector
+                val sliced = sorted.sliding(slideNum, slideNum).toVector
                 temp ++= sliced
             }
         )

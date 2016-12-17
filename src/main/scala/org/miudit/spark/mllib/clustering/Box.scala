@@ -14,11 +14,20 @@ class Box (
     var mergeId = 1
 
     def contains (point: Point) = {
+        //bounds.zip(point.coordinates).foreach(x => println("bound = (%s, %s), double = %s".format(x._1.lower, x._1.upper, x._2)))
         bounds.zip (point.coordinates).forall( x => x._1.contains(x._2) )
     }
 
     def setPartitionId (partitionId: Int): Box = {
-        new Box (this.bounds, this.boxId, partitionId, this.adjacentBoxes)
+        var newBox = new Box (this.bounds, this.boxId, partitionId, this.adjacentBoxes)
+        newBox.mergeId = this.mergeId
+        newBox
+    }
+
+    def setBoxId (boxId: Int): Box = {
+        var newBox = new Box (this.bounds, boxId, this.partitionId, this.adjacentBoxes)
+        newBox.mergeId = this.mergeId
+        newBox
     }
 
     def expand (epsilon: Double): Box = {
@@ -28,15 +37,18 @@ class Box (
         newBox
     }
 
-    def splitAlongDimension (boxIdGenerator: BoxIdGenerator): Iterable[Box] = {
+    def splitAlongDimension (points: Iterable[Point], boxIdGenerator: BoxIdGenerator): Iterable[Box] = {
         val (longestDimension, idx) = findLongestDimensionAndItsIndex()
         val beforeLongest = if (idx > 0) bounds.take (idx) else Array[BoundsInOneDimension] ()
         val afterLongest = if (idx < bounds.size-1) bounds.drop(idx+1) else Array[BoundsInOneDimension] ()
         val splits = longestDimension.split(2)
+        val median = findMedian(idx, points)
+        //val splits = longestDimension.splitWhere(median)
         splits.zipWithIndex.map {
             s => {
                 val newBounds = (beforeLongest :+ s._1) ++: afterLongest
-                val newMergeId: Int = String.valueOf(mergeId).length() * mergeId + s._2
+                //val newMergeId: Int = 10 * String.valueOf(mergeId).length() * mergeId + s._2
+                val newMergeId: Int = 10 * mergeId + s._2
                 val newBox = new Box (newBounds, boxIdGenerator.getNextId())
                 newBox.mergeId = newMergeId
                 newBox
@@ -51,13 +63,20 @@ class Box (
         }*/
     }
 
+    def findMedian (index: Int, points: Iterable[Point]): Double = {
+        val result = points.map( p => p.coordinates(index) ).toList
+        result
+        .sortWith(_ < _)
+        .drop(result.length/2).head
+    }
+
     def overlapsWith (box: Box): Boolean = {
         val bounds1 = bounds
         val bounds2 = box.bounds
         var overlap = true
         val a = bounds1.zip(bounds2).map(
             b => {
-                overlap = (b._1.upper > b._2.lower && b._1.lower < b._2.upper) & overlap
+                overlap = (b._1.upper > b._2.lower && b._1.lower < b._2.upper) && overlap
             }
         )
         overlap
@@ -74,7 +93,10 @@ class Box (
     }*/
 
     def overlapPoints(points: Iterable[MutablePoint]): Iterable[MutablePoint] = {
-        points.filter( p => contains(p) )
+        //println("FFF SIZE = %s".format(points.size))
+        val result = points.filter( p => contains(p) )
+        println("RESULT SIZE = %s".format(result.size))
+        result
     }
 
     private def findLongestDimensionAndItsIndex(): (BoundsInOneDimension, Int) = {
@@ -114,7 +136,7 @@ class BoundsInOneDimension (
     val includeHigherBound: Boolean = false ) extends Serializable {
 
     def contains(n: Double) = {
-        (n >= lower) &&  (n < upper)
+        (n >= lower) &&  ((n < upper) || (includeHigherBound && (n <= upper)))
     }
 
     def length: Double = upper - lower
@@ -131,6 +153,12 @@ class BoundsInOneDimension (
             currentLowerBound = newUpperBound
         }
         result.reverse
+    }
+
+    def splitWhere (value: Double): List[BoundsInOneDimension] = {
+        val newBounds1 = new BoundsInOneDimension(lower, value, false)
+        val newBounds2 = new BoundsInOneDimension(value, upper, includeHigherBound)
+        List(newBounds1, newBounds2)
     }
 
     def extend (epsilon: Double): BoundsInOneDimension = {
@@ -164,9 +192,19 @@ class BoxCalculator (val data: RDD[Point]) {
         val bounds = calculateBounds(data, numOfDimensions)
         val rootBox = new Box(bounds.toArray, 0)
         rootBox.mergeId = 1
-        val boxTree = BoxCalculator.generateTree(rootBox, 0)
+        //MEMO: if data is larger than memory of one node, then possibly can't split by median (due to passing points)
+        val boxTree = BoxCalculator.generateTree(rootBox, data.collect.toIterable, 0)
 
-        val boxes = boxTree.flattenBoxes
+        // reassign box Ids
+        val boxes = boxTree.flattenBoxes(x => true)
+            .zipWithIndex.map( x => x._1.setBoxId(x._2) )
+
+        boxes.iterator.foreach(it => {
+            println(it)
+            it.bounds.iterator.foreach(x => println("lower=%s, upper=%s".format(x.lower, x.upper)))
+        })
+
+        rootBox.bounds.iterator.foreach( x => println("bounding box lower = %s, upper=%s".format(x.lower, x.upper)) )
 
         (BoxPartitioner.assignPartitionIdsToBoxes(boxes), rootBox)
         //(boxes, rootBox)
@@ -200,14 +238,15 @@ private object BoxCalculator {
 
     val maxTreeLevel = 3 // log(partitionNum)
 
-    def generateTree (root: Box, treeLevel: Int): BoxTreeNode = {
+    def generateTree (root: Box, points: Iterable[Point], treeLevel: Int): BoxTreeNode = {
 
-        BoxCalculator.generateTree(root, treeLevel, new BoxIdGenerator(root.boxId))
+        BoxCalculator.generateTree(root, points, treeLevel, new BoxIdGenerator(root.boxId))
 
     }
 
     def generateTree (
         root: Box,
+        points: Iterable[Point],
         treeLevel: Int,
         boxIdGenerator: BoxIdGenerator ): BoxTreeNode = {
 
@@ -215,8 +254,8 @@ private object BoxCalculator {
 
         result.children = if (treeLevel < maxTreeLevel) {
             val newTreeLevel = treeLevel + 1
-            root.splitAlongDimension(boxIdGenerator)
-                .map(x => generateTree(x, newTreeLevel, boxIdGenerator))
+            root.splitAlongDimension(points, boxIdGenerator)
+                .map(x => generateTree(x, points, newTreeLevel, boxIdGenerator))
                 .toList
         }
         else {

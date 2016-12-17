@@ -17,13 +17,14 @@ object OpticsDriver {
 
         val inputData: RDD[Array[Double]] = inputCSV.map(
             line => {
-                line.split(",").zipWithIndex.filter( x => x._2 != 8 ).map( x => x._1.toDouble )
+                line.split(",").zipWithIndex.filter( x => x._2 != 4 ).map( x => x._1.toDouble )
             }
         )
 
         val opticsResult = Optics.train(inputData, epsilon, minPts)
 
         println("finished!")
-        println("data: %s".format(inputData))
+        println("input data: %s".format(inputData))
+        println("result: %s".format(opticsResult.points))
     }
 }

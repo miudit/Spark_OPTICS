@@ -91,7 +91,10 @@ object PointIndexer {
                 val distanceFromOrigin = distanceMeasure.compute(pt.coordinates.toArray, origin.coordinates.toArray)
                 val boxId = box match {
                     case existingBox: Some[Box] => existingBox.get.boxId
-                    case _ => 0 // throw an exception?
+                    case _ => {
+                        println("Oh NO POINT = (%s, %s)".format(pt.coordinates(0), pt.coordinates(1)))
+                        0 // throw an exception?
+                    }
                 }
                 val newPoint = new Point (pt.coordinates, pointIndex, boxId, pt.clusterId, pt.coreDist,
                     pt.reachDist, pt.processed, pt.noise)
