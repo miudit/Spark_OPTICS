@@ -71,9 +71,9 @@ class Optics private (
                 //println("partitionSize = %s".format(it.size))
                 //println("partitionIterator = %s".format(it))
                 val partitionBoundingBox = boxes.find(  _.partitionId == partitionIndex ).get
-                println("partitionBoundingBox = %s".format(partitionBoundingBox))
+                //println("partitionBoundingBox = %s".format(partitionBoundingBox))
                 val partialResult = partialClustering(it, partitionBoundingBox)
-                println("partialResult = %s".format(partialResult))
+                //println("partialResult = %s".format(partialResult))
                 Vector( (partitionBoundingBox.mergeId, (partialResult, partitionBoundingBox)) ).toIterator
             },
             preservesPartitioning = true
@@ -159,17 +159,19 @@ class Optics private (
 
         println("partialClustering finished!")
 
-        points.values
-        .find( p => p.noise )
+        /*points.values
+        .filter( p => p.noise )
         .map(
             p => {
                 // set all points' processed as false for merging
-                p.processed = false
+                //p.processed = false
                 clusterOrdering.append(p)
             }
-        )
+        )*/
 
-        //println("POINTS COUNT = %s, PARTIAL COUNT = %s".format(points.size, clusterOrdering.distinct.size))
+        //println("NOISE SIZE = %s".format(points.values.filter(p => p.noise).size))
+        //println("UNPROCESSED SIZE = %s".format(points.values.filter(p => !p.processed).size))
+        println("PARTIAL COUNT = %s, DISTINCE PARTIAL COUNT = %s".format(clusterOrdering.size, clusterOrdering.distinct.size))
 
         clusterOrdering
     }
@@ -181,7 +183,7 @@ class Optics private (
         priorityQueue: PriorityQueue[MutablePoint],
         clusterOrdering: ClusterOrdering ): Unit = {
 
-        var neighbors = partitionIndexer.findNeighbors(startPoint, true)
+        var neighbors = partitionIndexer.findNeighbors(startPoint, false)
                                         .map{ p => p.asInstanceOf[MutablePoint] }
 
         startPoint.processed = true
@@ -190,6 +192,10 @@ class Optics private (
 
         var coreDist = calcCoreDist(startPoint, partitionIndexer)
         startPoint.coreDist = coreDist
+
+        if (clusterOrdering.find(p => p.pointId == startPoint.pointId).isDefined) {
+            println("ALREADY EXISTS A")
+        }
 
         clusterOrdering.append(startPoint)
 
@@ -216,6 +222,9 @@ class Optics private (
                                                     .map{ p => p.asInstanceOf[MutablePoint] }
                 nextPoint.processed = true
                 nextPoint.coreDist = calcCoreDist(nextPoint, partitionIndexer)
+                if (clusterOrdering.find(p => p.pointId == nextPoint.pointId).isDefined) {
+                    println("ALREADY EXISTS B POINT = (%s, %s)".format(nextPoint.coordinates(0), nextPoint.coordinates(1)))
+                }
                 clusterOrdering.append(nextPoint)
                 if ( nextPoint.coreDist != Optics.undefinedDist ) {
                     update(priorityQueue, nextPoint, nextNeighbors)
@@ -230,6 +239,8 @@ class Optics private (
         partitionIndexer: PartitionIndexer ): Double = {
 
         var neighbors = partitionIndexer.findNeighbors(origin, false)
+
+        //println("ORIGIN = (%s, %s), NEIGHBOR SIZE = %s".format(origin.coordinates(0), origin.coordinates(1), neighbors.size))
 
         var coreDist = Optics.undefinedDist
 
@@ -250,6 +261,9 @@ class Optics private (
         priorityQueue: PriorityQueue[MutablePoint],
         clusterOrdering: ClusterOrdering ): Unit = {
 
+        if (clusterOrdering.find(p => p.pointId == point.pointId).isDefined) {
+            println("ALREADY EXISTS C")
+        }
         clusterOrdering.append(point)
 
         update(priorityQueue, point, neighbors)
@@ -267,6 +281,7 @@ class Optics private (
         neighbors: Iterable[MutablePoint] ): Unit = {
 
         neighbors
+        .filter( p => !p.processed )
         .map( p => {
             var dist = math.max(point.coreDist, PartitionIndexer.distance(point, p))
             p.reachDist match {
@@ -478,10 +493,15 @@ class Optics private (
         } )
 
         println("MARKED POINTS1 SIZE = %s".format(markedPoints1.size))
+        println("MARKED POINTS1 DISTINCT SIZE = %s".format(markedPoints1.toList.distinct.size))
 
         println("HERE F")
 
         var newClusterOrdering = new ClusterOrdering()
+
+        if (markedPoints1.filter(p => p.isAffected).size == 0){
+            println("NO AFFECTED POINT LIST2 = %s".format(markedPoints2.filter(p => p.isAffected).size))
+        }
 
         processClusterOrdering(markedPoints1, markedPoints2, indexer1, co1, newClusterOrdering)
         processClusterOrdering(markedPoints2, markedPoints1, indexer2, co2, newClusterOrdering)
