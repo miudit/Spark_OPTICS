@@ -26,5 +26,8 @@ object OpticsDriver {
         println("finished!")
         println("input data: %s".format(inputData))
         println("result: %s".format(opticsResult.points))
+        opticsResult.points.collect.foreach(
+            co => co.map( x => println("CLUSTER ID = %s, POINT = (%s, %s), coreDist = %s, reachDist = %s".format(x.clusterId, x.coordinates(0), x.coordinates(1), x.coreDist, x.reachDist)) )
+        )
     }
 }
