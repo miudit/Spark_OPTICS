@@ -237,7 +237,7 @@ class BoxCalculator (val data: RDD[Point]) {
 
 private object BoxCalculator {
 
-    val maxTreeLevel = 3 // log(partitionNum)
+    val maxTreeLevel = 1 // log(partitionNum)
 
     def generateTree (root: Box, points: Iterable[Point], treeLevel: Int): BoxTreeNode = {
 

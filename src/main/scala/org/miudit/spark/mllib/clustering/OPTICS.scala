@@ -81,7 +81,7 @@ class Optics private (
 
         //partialClusters.collect.foreach(x => println("aaa = %s".format(x)))
 
-        println("COUNT = %s".format(partialClusters.count()))
+        //println("COUNT = %s".format(partialClusters.count()))
 
         //partialClusters.foreachPartition(x => None)
         //val newPartialClusters = partialClusters.mapPartitions(x => x, true).persist()
@@ -107,12 +107,20 @@ class Optics private (
 
         println("START MERGING !!!")
         //val mergedClusters = mergeClusters(partialClusters, partitionedData.boxes, partitionIdsToMergeIds)
-        val mergedClusters = mergeClusters(partialClusters, partitionedData.boxes, partitionIdsToMergeIds)
+        var mergedClusters = mergeClusters(partialClusters, partitionedData.boxes, partitionIdsToMergeIds)
+
+        assert(mergedClusters.partitions.size == 1, "Merged Clusters RDD Partition Size != 1")
+
+        mergedClusters = mergedClusters.map (
+            co => {
+                Optics.extractClusterOrdering(co, epsilon)
+            }
+        )
 
         println("num of partitions of mergedClusters = %s".format(mergedClusters.partitions.size))
 
         mergedClusters.foreach( co => {
-            co.map( x => println("coredist = %s".format(x.coreDist)) )
+            co.map( x => println("CLUSTER ID = %s, POINT = (%s, %s), coreDist = %s, reachDist = %s".format(x.clusterId, x.coordinates(0), x.coordinates(1), x.coreDist, x.reachDist)) )
         } )
 
         new OpticsModel(mergedClusters, epsilon, minPts)
@@ -278,14 +286,24 @@ class Optics private (
     private def update (
         priorityQueue: PriorityQueue[MutablePoint],
         point: MutablePoint,
-        neighbors: Iterable[MutablePoint] ): Unit = {
+        neighbors: Iterable[MutablePoint],
+        debug: Boolean = false ): Unit = {
+
+        if(debug)
+            println("UNPROCESSED SIZE = %s".format(neighbors.filter(p => !p.processed).size))
 
         neighbors
         .filter( p => !p.processed )
         .map( p => {
             var dist = math.max(point.coreDist, PartitionIndexer.distance(point, p))
+            //if(debug)
+            //    println("REACH DIST = %s".format(p.reachDist))
             p.reachDist match {
                 case Some(d) => {
+                    // for process affected point at merging phase
+                    if( priorityQueue.find(x => x.pointId == p.pointId).isEmpty ) {
+                        priorityQueue.enqueue(p)
+                    }
                     if (p.reachDist.get > dist) {
                         p.reachDist = Option(dist)
                         /*if(!priorityQueue.find( _.pointId == p.pointId ).isDefined){
@@ -298,7 +316,8 @@ class Optics private (
                 }
                 case None => {
                     p.reachDist = Option(dist)
-                    //println("enqueue")
+                    if(debug)
+                        println("enqueue")
                     //println("reachDist = %s".format(p.reachDist))
                     priorityQueue.enqueue(p)
                 }
@@ -387,22 +406,19 @@ class Optics private (
             .reduceByKey(
                 (p1, p2) => {
                     println("REDUCE!")
-                    println("BOX 1 = (%s, %s), (%s, %s), BOX 2 = (%s, %s), (%s, %s)".format(
+                    /*println("BOX 1 = (%s, %s), (%s, %s), BOX 2 = (%s, %s), (%s, %s)".format(
                         p1._2.bounds(0).lower, p1._2.bounds(0).upper, p1._2.bounds(1).lower, p1._2.bounds(1).upper,
                         p2._2.bounds(0).lower, p2._2.bounds(0).upper, p2._2.bounds(1).lower, p2._2.bounds(1).upper
-                    ))
+                    ))*/
                     val mergeResult = merge(p1._1, p2._1, p1._2, p2._2)
-                    println("MERGE RESULT SIZE = %s".format(mergeResult.size))
+                    //println("MERGE RESULT SIZE = %s".format(mergeResult.size))
                     val newBox = boxes.find( _.mergeId == p1._2.mergeId ).get
-                    println("NEW BOX = %s".format(newBox))
+                    //println("NEW BOX = %s".format(newBox))
                     ( mergeResult, newBox )
                 },
                 partialClusterOrderings.getNumPartitions/2
             )
             println("REDUCE FINISHED !!!")
-            val temp = partialClusterOrderings.count()
-            println("new Partial CO = %s".format(temp))
-            println("new partialCO Size = %s".format(partialClusterOrderings.partitions.size))
         }
 
         partialClusterOrderings.map( co => co._2._1 )
@@ -414,6 +430,8 @@ class Optics private (
         box1: Box,
         box2: Box ): ClusterOrdering = {
 
+        println("MERGEMERGEMERGE")
+
         val expandedBox1 = box1.expand(epsilon)
         val expandedBox2 = box2.expand(epsilon)
 
@@ -423,7 +441,7 @@ class Optics private (
         ))
         println("+++++++++++++++++++")*/
 
-        println("HERE A")
+        //println("HERE A")
 
         var tempId = 0
         // 全点のprocessedをfalseにリセット
@@ -432,15 +450,15 @@ class Optics private (
 
         val mostright = points1.maxBy(_.coordinates(0))
         val mostleft = points1.minBy(_.coordinates(0))
-        println("MOST RIGHT POINT = (%s, %s)".format(mostright.coordinates(0), mostright.coordinates(1)))
-        println("MOST LEFT POINT = (%s, %s)".format(mostleft.coordinates(0), mostleft.coordinates(1)))
+        //println("MOST RIGHT POINT = (%s, %s)".format(mostright.coordinates(0), mostright.coordinates(1)))
+        //println("MOST LEFT POINT = (%s, %s)".format(mostleft.coordinates(0), mostleft.coordinates(1)))
 
         val mostright2 = points2.maxBy(_.coordinates(0))
         val mostleft2 = points2.minBy(_.coordinates(0))
-        println("MOST RIGHT POINT = (%s, %s)".format(mostright2.coordinates(0), mostright2.coordinates(1)))
-        println("MOST LEFT POINT = (%s, %s)".format(mostleft2.coordinates(0), mostleft2.coordinates(1)))
+        //println("MOST RIGHT POINT = (%s, %s)".format(mostright2.coordinates(0), mostright2.coordinates(1)))
+        //println("MOST LEFT POINT = (%s, %s)".format(mostleft2.coordinates(0), mostleft2.coordinates(1)))
 
-        println("HERE B")
+        //println("HERE B")
 
         val expandedPoints1 = points1 ++ expandedBox1.overlapPoints(points2)
         val expandedPoints2 = points2 ++ expandedBox2.overlapPoints(points1)
@@ -448,66 +466,94 @@ class Optics private (
         //println("before1 size = %s, after1 size = %s".format(points1.size, expandedPoints1.size))
         //println("before2 size = %s, after2 size = %s".format(points2.size, expandedPoints2.size))
 
-        println("HERE C")
+        //println("HERE C")
 
         val indexer1 = new PartitionIndexer(expandedBox1, expandedPoints1, epsilon, minPts)
         val indexer2 = new PartitionIndexer(expandedBox2, expandedPoints2, epsilon, minPts)
 
-        println("HERE D")
-
-        /*println("===========================")
-        println("points1 size = %s".format(indexer1.points.size))
-        println("points2 size = %s".format(indexer2.points.size))
-        //indexer1.points.foreach( p => println("POINT1 = (%s, %s)".format(p.coordinates(0), p.coordinates(1))) )
-        //indexer2.points.foreach( p => println("POINT2 = (%s, %s)".format(p.coordinates(0), p.coordinates(1))) )
-        println("===========================")*/
-
-        val bounds1 = indexer1.boxesTree.box.bounds
-        val bounds2 = indexer2.boxesTree.box.bounds
-        println("INDEXER1's BOX BOUNDS = (%s, %s), (%s, %s)".format(bounds1(0).lower, bounds1(0).upper,
-            bounds1(1).lower, bounds1(1).upper ))
-        println("INDEXER2's BOX BOUNDS = (%s, %s), (%s, %s)".format(bounds2(0).lower, bounds2(0).upper,
-            bounds2(1).lower, bounds2(1).upper ))
-
-        val children = indexer1.boxesTree.children
-        children.zipWithIndex.map(
-            child =>{
-                val bounds = child._1.box.bounds
-                println("INDEXER1's CHILD %s BOX BOUDS = (%s, %s), (%s, %s)".format(child._2, bounds(0).lower, bounds(0).upper,
-                    bounds(1).lower, bounds(1).upper ))
-            }
-        )
+        //println("HERE D")
 
         markAffectedPoints(indexer1.boxesTree, indexer2.boxesTree)
 
-        println("HERE E")
+        //println("HERE E")
 
         // affected pointとしてマークした情報を反映
-        val markedPoints1 = indexer1.points.zip(points1).map( p => {
-            p._2.isAffected = p._1.isAffected
-            p._2
-        } )
-        val markedPoints2= indexer2.points.zip(points2).map( p => {
-            p._2.isAffected = p._1.isAffected
-            p._2
-        } )
+        val markedPoints1 = points1.map( p => {
+            val pointInIndexer1 = indexer1.points.find( x => x.pointId == p.pointId )
+            assert( pointInIndexer1.isDefined, "Something wrong" )
+            p.isAffected = pointInIndexer1.get.isAffected
+            p
+        })
+        val markedPoints2 = points2.map( p => {
+            val pointInIndexer2 = indexer2.points.find( x => x.pointId == p.pointId )
+            assert( pointInIndexer2.isDefined, "Something wrong" )
+            p.isAffected = pointInIndexer2.get.isAffected
+            p
+        })
 
-        println("MARKED POINTS1 SIZE = %s".format(markedPoints1.size))
-        println("MARKED POINTS1 DISTINCT SIZE = %s".format(markedPoints1.toList.distinct.size))
+        //affectedをco1, co2にも反映
+        val markedCO1 = co1.map( p => {
+            val pointInIndexer1 = indexer1.points.find( x => x.pointId == p.pointId )
+            assert( pointInIndexer1.isDefined, "Something wrong2" )
+            p.isAffected = pointInIndexer1.get.isAffected
+            p
+        })
+        val markedCO2 = co2.map( p => {
+            val pointInIndexer2 = indexer2.points.find( x => x.pointId == p.pointId )
+            assert( pointInIndexer2.isDefined, "Something wrong2" )
+            p.isAffected = pointInIndexer2.get.isAffected
+            p
+        })
 
-        println("HERE F")
+        //println("MARKED POINTS1 SIZE = %s, DISTINCT MARKED POINTS1 SIZE = %s".format(markedPoints1.size, markedPoints1.toList.distinct.size))
+        //println("MARKED POINTS2 SIZE = %s, DISTINCT MARKED POINTS2 SIZE = %s".format(markedPoints2.size, markedPoints2.toList.distinct.size))
+
+        //println("HERE F")
 
         var newClusterOrdering = new ClusterOrdering()
 
-        if (markedPoints1.filter(p => p.isAffected).size == 0){
-            println("NO AFFECTED POINT LIST2 = %s".format(markedPoints2.filter(p => p.isAffected).size))
+        println("AFFECTED SIZE 1 = %s, AFFECTED SIZE 2 = %s, UNAFFECTED SIZE 1 = %s, UNAFFECTED SIZE 2 = %s".format(
+            markedCO1.filter(p => p.isAffected).size,
+            markedCO2.filter(p => p.isAffected).size,
+            markedCO1.filter(p => !p.isAffected).size,
+            markedCO2.filter(p => !p.isAffected).size
+        ))
+
+        // affectes size = 0 の場合は単純にco1,co2を結合
+        if ( markedCO1.filter(p => p.isAffected).size == 0 ) {
+            println("CO1 ONLY UNAFFECTED")
+            newClusterOrdering = newClusterOrdering ++ markedCO1
+        }
+        else {
+            processClusterOrdering(markedPoints1, markedPoints2, indexer1, markedCO1, newClusterOrdering)
+        }
+        if ( markedCO2.filter(p => p.isAffected).size == 0 ) {
+            println("CO2 ONLY UNAFFECTED")
+            newClusterOrdering = newClusterOrdering ++ markedCO2
+        }
+        else {
+            processClusterOrdering(markedPoints2, markedPoints1, indexer2, markedCO2, newClusterOrdering)
         }
 
-        processClusterOrdering(markedPoints1, markedPoints2, indexer1, co1, newClusterOrdering)
-        processClusterOrdering(markedPoints2, markedPoints1, indexer2, co2, newClusterOrdering)
+        println("AFFECTED SIZE = %s, UNAFFECTED SIZE = %s".format(
+            newClusterOrdering.filter(p => p.isAffected).size,
+            newClusterOrdering.filter(p => !p.isAffected).size
+        ))
 
-        println("HERE G")
+        //if ( markedCO1.filter(p => p.isAffected).size > 0 )
+        //assert( markedCO1.filter(p => p.isAffected).size > 0, "NO AFFECTED POINT IN CO1" )
+        //processClusterOrdering(markedPoints1, markedPoints2, indexer1, markedCO1, newClusterOrdering)
+        //else
+        //    None
+        //println("SSSSSSSS")
+        //if ( markedCO2.filter(p => p.isAffected).size > 0 )
+        //assert( markedCO2.filter(p => p.isAffected).size > 0, "NO AFFECTED POINT IN CO2" )
+        //processClusterOrdering(markedPoints2, markedPoints1, indexer2, markedCO2, newClusterOrdering)
+        //else None
 
+        //println("HERE G")
+
+        println("CO1 SIZE = %s, CO2 SIZE = %s".format(co1.size, co2.size))
         println("NEW CLUSTER ORDERING SIZE = %s".format(newClusterOrdering.size))
 
         newClusterOrdering
@@ -520,56 +566,68 @@ class Optics private (
         clusterOrdering: ClusterOrdering,
         newClusterOrdering: ClusterOrdering): Unit = {
 
-        println("PROCESS CLUSTER ORDERING !!!")
-
         var priorityQueue = new PriorityQueue[MutablePoint]()(Ordering.by[MutablePoint, Double](_.reachDist.get).reverse)
 
+        //val debug = clusterOrdering.find(_.pointId == 50).isDefined
+
+        println("PROCESS CLUSTER ORDERING !!!")
+
         //while (clusterOrdering.size > 0) {
-        while ( clusterOrdering.filter(p => !p.processed).size > 0 ) {
+        //while ( clusterOrdering.filter(p => !p.processed).size > 0 ) {
+        while ( clusterOrdering.filter(p => p.isAffected && !p.processed).size > 0 ) {
             //println("NOT PROCESSED SIZE = %s".format(clusterOrdering.filter(p => !p.processed).size))
             //println("TTTTTTTTTTTTTTTTTTTTT")
             if (!priorityQueue.isEmpty) {
                 assert( priorityQueue.size > 0, "priorityQueue has no element @ processClusterOrdering" )
                 val q = priorityQueue.dequeue()
                 if (q.isAffected){
-                    println("AFFECTED")
+                    //println("AFFECTED")
                 }
-                println("UUUUUUUUUUUUUUUUUUUU")
                 process(points1, points2, q, indexer, priorityQueue, newClusterOrdering)
             }
             else {
                 //println("PQ IS EMPTY")
                 breakable(
-                    /*while (clusterOrdering.size > 0) {
-                        println("KKKKKKKKKKKKKKKK")
-                        val x = findOneUnprocessedPoint(clusterOrdering).get
-                        if (x.isAffected) {
-                            processAffectedPoint(points1, points2, x, indexer, priorityQueue, newClusterOrdering)
-                            if (!priorityQueue.isEmpty)
-                                break
-                        }
-                    }*/
-                    clusterOrdering.map(
-                        p => {
-                            if ( !p.processed ){
-                                if (p.isAffected) {
-                                    processAffectedPoint(points1, points2, p, indexer, priorityQueue, newClusterOrdering)
-                                    if (!priorityQueue.isEmpty)
-                                        break
+                    for (i <- 0 to clusterOrdering.size-1) {
+                        val p = clusterOrdering(i)
+                        if ( !p.processed ){
+                            if (p.isAffected) {
+                                processAffectedPoint(points1, points2, p, indexer, priorityQueue, newClusterOrdering)
+                                if (!priorityQueue.isEmpty){
+                                    break
                                 }
                             }
                         }
-                    )
+                    }
                 )
+                if( clusterOrdering.filter(p => p.isAffected && !p.processed).size == 0 ){
+                    println("NO MORE AFFECTED OR UNPROCESSED POINTS")
+                }
             }
-            //println("LLLLLLLLLLLLLLL")
         }
 
+        println("START FOR ALL NON AFFECTED")
+        // append not added unaffected points
         while (!priorityQueue.isEmpty) {
+            println("AHAAHAAHA")
             assert( priorityQueue.size > 0, "priorityQueue has no element @ processClusterOrdering 2" )
             val q = priorityQueue.dequeue()
             process(points1, points2, q, indexer, priorityQueue, newClusterOrdering)
         }
+
+        assert( clusterOrdering.filter(p => p.isAffected && !p.processed).size == 0, "AFFECTED POINTS REMAINING" )
+
+        // process for all unprocessed unaffected points if exists
+        breakable(
+            for ( i <- 0 to clusterOrdering.size ) {
+                val p = clusterOrdering(i)
+                if ( !p.isAffected && !p.processed ) {
+                    processNonAffectedPoint(points1, points2, p, indexer, priorityQueue, newClusterOrdering)
+                }
+                if ( clusterOrdering.filter(p => !p.isAffected && !p.processed).size == 0 )
+                    break
+            }
+        )
 
     }
 
@@ -581,18 +639,30 @@ class Optics private (
         priorityQueue: PriorityQueue[MutablePoint],
         newClusterOrdering: ClusterOrdering ): Unit = {
 
+        val debug = points1.find(_.pointId == 50).isDefined
+
         val neighbors = indexer.findNeighbors(point, false)
             .map{ p => p.asInstanceOf[MutablePoint] }
 
-        println("NEIGHBORS = %s".format(neighbors.size))
+        if(debug)
+            println("NEIGHBORS = %s".format(neighbors.size))
 
         if (neighbors.size >= minPts) {
-            point.noise = false
+            //point.noise = false
+            //println("BEFORE COREDIST = %s".format(point.coreDist))
             point.coreDist = calcCoreDist(point, indexer)
-            update(priorityQueue, point, neighbors)
+            //println("AFTER COREDIST = %s".format(point.coreDist))
+            if(debug){
+                println("UPDATE HAITTERU")
+                println("BEFORE PQ SIZE = %s".format(priorityQueue.size))
+            }
+            update(priorityQueue, point, neighbors, debug)
+            if(debug){
+                println("AFTER PQ SIZE = %s".format(priorityQueue.size))
+            }
             //point.processed = true
             newClusterOrdering.append(point)
-            println("APPENDED POINT = %s".format(point))
+            //println("APPENDED POINT = %s".format(point))
         }
 
         point.processed = true
@@ -610,20 +680,33 @@ class Optics private (
             indexer.findNeighbors(point, false)
                 .map{ p => p.asInstanceOf[MutablePoint] }
                 .find( p => {
-                    point.reachDist.get == Math.max( point.coreDist, PartitionIndexer.distance(point, p) )
+                    if ( point.reachDist.isDefined )
+                        point.reachDist.get == Math.max( point.coreDist, PartitionIndexer.distance(point, p) )
+                    else
+                        false
                 } )
         }
 
         println("OOOOOOOOOOOOOOOOOOOOOOOOOOOO")
 
+        // predecessorがUNDEFINEDの時targetsがどうなるか
+        val predecessor = findPrecedessor(point)
+        var predecessorSingletonList = Iterable[MutablePoint]()
+        if (predecessor.isDefined) {
+            predecessorSingletonList = Iterable[MutablePoint](predecessor.get)
+        }
+
         val successors = indexer.findNeighbors(point, false)
             .map{ p => p.asInstanceOf[MutablePoint] }
-            .filter( p => { point.pointId == findPrecedessor(p).get.pointId } )
+            .filter( p => {
+                val predecessor = findPrecedessor(p)
+                if (predecessor.isDefined)
+                    point.pointId == findPrecedessor(p).get.pointId
+                else
+                    false
+            } )
 
-        // predecessorがUNDEFINEDの時targetsがどうなるか
-        val predecessor = Iterable[MutablePoint](findPrecedessor(point).get)
-
-        val targets = successors ++ predecessor
+        val targets = successors ++ predecessorSingletonList
 
         targets.filter( p => ! p.processed )
             .map( p => {
@@ -652,6 +735,11 @@ class Optics private (
         indexer: PartitionIndexer,
         priorityQueue: PriorityQueue[MutablePoint],
         newClusterOrdering: ClusterOrdering ): Unit = {
+
+        val debug = points1.find(_.pointId == 50).isDefined
+
+        if(debug)
+            println("PPPPPPPPPPPPPP")
 
         if (point.isAffected) {
             processAffectedPoint(points1, points2, point, indexer, priorityQueue, newClusterOrdering)
@@ -690,7 +778,7 @@ class Optics private (
                     //println("x: %s, y: %s".format(x, y))
                     //println("DIST = %s".format(PartitionIndexer.distance(x, y)))
                     if (PartitionIndexer.distance(x, y) < epsilon) {
-                        println("MARK AFFECTED !!!!!!")
+                        //println("MARK AFFECTED !!!!!!")
                         x.isAffected = true
                         y.isAffected = true
                     }
@@ -706,6 +794,8 @@ object Optics {
 
     private val undefinedDist = -1.0
 
+    private val noiseId = -1
+
     def train (
         data: RDD[Array[Double]],
         epsilon: Double,
@@ -714,4 +804,45 @@ object Optics {
             .setMinPts(minPts)
             .run(data)
     }
+
+    def extractClusterOrdering (
+        clusterOrdering: ClusterOrdering,
+        epsilon: Double ): ClusterOrdering = {
+
+        var clusterId = noiseId
+
+        clusterOrdering.map(
+            p => {
+                p.reachDist match {
+                    case Some(d) => {
+                        if ( p.reachDist.get > epsilon ) {
+                            if ( p.coreDist != -1 && p.coreDist <= epsilon ) {
+                                clusterId = clusterId + 1
+                                println("ID CHANGED")
+                                p.clusterId = clusterId
+                            }
+                            else {
+                                p.clusterId = noiseId
+                            }
+                        }
+                        else {
+                            p.clusterId = clusterId
+                        }
+                    }
+                    case None => {
+                        if ( p.coreDist != -1 && p.coreDist <= epsilon ) {
+                            clusterId = clusterId + 1
+                            p.clusterId = clusterId
+                        }
+                        else {
+                            p.clusterId = noiseId
+                        }
+                    }
+                }
+                p
+            }
+        )
+
+    }
+
 }

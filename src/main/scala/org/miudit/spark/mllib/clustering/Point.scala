@@ -8,7 +8,7 @@ class Point (
     val coordinates: Array[Double],
     val pointId: Long = 0,
     val boxId: Int = 0,
-    val clusterId: Int = 0,
+    var clusterId: Int = -1,
     var coreDist: Double = Double.MaxValue,
     var reachDist: Option[Double] = None,
     var processed: Boolean = false,
