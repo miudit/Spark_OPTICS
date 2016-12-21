@@ -59,7 +59,7 @@ class PointSortKey (point: Point) extends Ordered[PointSortKey] with Serializabl
 class PointIndexer (val numOfPartitions: Int, val currentPartition: Int) {
 
     val multiplier = computeMultiplier (numOfPartitions)
-    println("MULTIPLIER = %s".format(multiplier))
+    //println("MULTIPLIER = %s".format(multiplier))
     var currentIndex: Long = 0
 
     def getNextIndex: Long = {
@@ -94,7 +94,6 @@ object PointIndexer {
                 val boxId = box match {
                     case existingBox: Some[Box] => existingBox.get.boxId
                     case _ => {
-                        println("Oh NO POINT = (%s, %s)".format(pt.coordinates(0), pt.coordinates(1)))
                         0 // throw an exception?
                     }
                 }

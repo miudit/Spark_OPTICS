@@ -43,7 +43,7 @@ class Box (
         val afterLongest = if (idx < bounds.size-1) bounds.drop(idx+1) else Array[BoundsInOneDimension] ()
         //val splits = longestDimension.split(2)
         val median = findMedian(idx, points)
-        println("MEDIAN = %s".format(median))
+        //println("MEDIAN = %s".format(median))
         val splits = longestDimension.splitWhere(median)
         splits.zipWithIndex.map {
             s => {
@@ -96,7 +96,7 @@ class Box (
     def overlapPoints(points: Iterable[MutablePoint]): Iterable[MutablePoint] = {
         //println("FFF SIZE = %s".format(points.size))
         val result = points.filter( p => contains(p) )
-        println("RESULT SIZE = %s".format(result.size))
+        //println("RESULT SIZE = %s".format(result.size))
         result
     }
 
@@ -200,12 +200,12 @@ class BoxCalculator (val data: RDD[Point]) {
         val boxes = boxTree.flattenBoxes(x => true)
             .zipWithIndex.map( x => x._1.setBoxId(x._2) )
 
-        boxes.iterator.foreach(it => {
+        /*boxes.iterator.foreach(it => {
             println(it)
             it.bounds.iterator.foreach(x => println("lower=%s, upper=%s".format(x.lower, x.upper)))
-        })
+        })*/
 
-        rootBox.bounds.iterator.foreach( x => println("bounding box lower = %s, upper=%s".format(x.lower, x.upper)) )
+        //rootBox.bounds.iterator.foreach( x => println("bounding box lower = %s, upper=%s".format(x.lower, x.upper)) )
 
         (BoxPartitioner.assignPartitionIdsToBoxes(boxes), rootBox)
         //(boxes, rootBox)

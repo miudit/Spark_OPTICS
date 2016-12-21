@@ -21,7 +21,13 @@ object OpticsDriver {
             }
         )
 
+        val startTime = System.nanoTime()
+
         val opticsResult = Optics.train(inputData, epsilon, minPts)
+
+        val endTime = System.nanoTime()
+
+        println("OVERALL ELAPSED TIME = %s ms".format( (endTime - startTime) / 1000000.0 ))
 
         println("finished!")
         println("input data: %s".format(inputData))
