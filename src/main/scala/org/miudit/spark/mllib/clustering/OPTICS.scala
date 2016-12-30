@@ -33,6 +33,8 @@ class Optics private (
         var points = data.map{p => new Point(p)}
         val partitionedData = PointPartitions(points, epsilon, minPts)
 
+        println("RUN !!!")
+
         //println("partitionedData = %s".format(partitionedData))
         //println("num of partitions of partitionedData = %s".format(partitionedData.partitions.size))
 
@@ -122,6 +124,8 @@ class Optics private (
         /*mergedClusters.foreach( co => {
             co.map( x => println("CLUSTER ID = %s, POINT = (%s, %s), coreDist = %s, reachDist = %s".format(x.clusterId, x.coordinates(0), x.coordinates(1), x.coreDist, x.reachDist)) )
         } )*/
+
+        println("RUN FINISHED")
 
         new OpticsModel(mergedClusters, epsilon, minPts)
     }

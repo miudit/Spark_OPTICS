@@ -27,13 +27,13 @@ object OpticsDriver {
 
         val endTime = System.nanoTime()
 
-        println("OVERALL ELAPSED TIME = %s ms".format( (endTime - startTime) / 1000000.0 ))
-
         println("finished!")
-        println("input data: %s".format(inputData))
-        println("result: %s".format(opticsResult.points))
+        println("ELAPSED TIME = %s ms".format( (endTime - startTime) / 1000000.0 ))
+
         opticsResult.points.collect.foreach(
             co => co.map( x => println("CLUSTER ID = %s, POINT = (%s, %s), coreDist = %s, reachDist = %s".format(x.clusterId, x.coordinates(0), x.coordinates(1), x.coreDist, x.reachDist)) )
+            //co => None
         )
+
     }
 }
