@@ -7,10 +7,12 @@ import org.apache.spark.rdd.RDD
 
 object OpticsDriver {
     def main(args: Array[String]) {
-        assert( args.size == 3, "wrong arguments %s".format(args.size) )
+        assert( args.size == 5, "wrong arguments %s".format(args.size) )
         val inputFile = args(0)
         val epsilon = args(1).toDouble
         val minPts = args(2).toInt
+        Optics.numOfExecterNodes = args(3).toInt
+        Optics.maxEntriesForRTree = args(4).toInt
         val conf = new SparkConf().setAppName("OPTICS")
         val sc = new SparkContext(conf)
         val inputCSV = sc.textFile(inputFile, 2).cache()
@@ -21,19 +23,14 @@ object OpticsDriver {
             }
         )
 
-        val startTime = System.nanoTime()
-
         val opticsResult = Optics.train(inputData, epsilon, minPts)
 
-        val endTime = System.nanoTime()
-
-        println("finished!")
-        println("ELAPSED TIME = %s ms".format( (endTime - startTime) / 1000000.0 ))
-
         opticsResult.points.collect.foreach(
-            co => co.map( x => println("CLUSTER ID = %s, POINT = (%s, %s), coreDist = %s, reachDist = %s".format(x.clusterId, x.coordinates(0), x.coordinates(1), x.coreDist, x.reachDist)) )
-            //co => None
+            //co => co.map( x => println("CLUSTER ID = %s, POINT = (%s, %s), coreDist = %s, reachDist = %s".format(x.clusterId, x.coordinates(0), x.coordinates(1), x.coreDist, x.reachDist)) )
+            co => None
         )
 
+        while(true)
+            None
     }
 }

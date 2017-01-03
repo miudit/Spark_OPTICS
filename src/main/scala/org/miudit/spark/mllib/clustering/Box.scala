@@ -237,7 +237,14 @@ class BoxCalculator (val data: RDD[Point]) {
 
 private object BoxCalculator {
 
-    val maxTreeLevel = 1 // log(partitionNum)
+    //val maxTreeLevel = 1 // log(partitionNum)
+    //var maxTreeLevel = Math.ceil(Math.pow(Optics.numOfExecterNodes, 1.0/2)).toInt
+    var maxTreeLevel = Math.round(Math.pow(Optics.numOfExecterNodes, 1.0/2)).toInt
+    if ( Optics.numOfExecterNodes == 1 ) {
+        maxTreeLevel = 0
+    }
+
+    println("TREE LEVEL = %s".format(maxTreeLevel))
 
     def generateTree (root: Box, points: Iterable[Point], treeLevel: Int): BoxTreeNode = {
 

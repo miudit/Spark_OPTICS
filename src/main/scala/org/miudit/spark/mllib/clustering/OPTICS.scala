@@ -66,6 +66,7 @@ class Optics private (
 
         val broadcastBoxes = data.sparkContext.broadcast(partitionedData.boxes)
 
+        println("START PARTIAL CLUSTERING")
         val partialClusters = partitionedData.mapPartitionsWithIndex (
             (partitionIndex, it) => {
                 val boxes = broadcastBoxes.value
@@ -107,15 +108,18 @@ class Optics private (
         val partitionIdsToMergeIds = partitionedData.boxes.map ( x => (x.partitionId, x.mergeId) ).toMap
         //println("partitionIdsToMergeIds = %s".format(partitionIdsToMergeIds))
 
-        //println("START MERGING !!!")
+        println("START MERGING")
         //val mergedClusters = mergeClusters(partialClusters, partitionedData.boxes, partitionIdsToMergeIds)
         var mergedClusters = mergeClusters(partialClusters, partitionedData.boxes, partitionIdsToMergeIds)
 
         assert(mergedClusters.partitions.size == 1, "Merged Clusters RDD Partition Size != 1")
 
-        mergedClusters = mergedClusters.map (
+        println("START EXTRACTING")
+        val extractedResult = mergedClusters.map (
             co => {
-                Optics.extractClusterOrdering(co, epsilon)
+                val result = Optics.extractClusterOrdering(co, epsilon)
+                println("RESULT CLUSTER SIZE = %s".format(result._2))
+                result._1
             }
         )
 
@@ -127,7 +131,7 @@ class Optics private (
 
         println("RUN FINISHED")
 
-        new OpticsModel(mergedClusters, epsilon, minPts)
+        new OpticsModel(extractedResult, epsilon, minPts)
     }
 
     private def partialClustering (
@@ -185,6 +189,7 @@ class Optics private (
         //println("UNPROCESSED SIZE = %s".format(points.values.filter(p => !p.processed).size))
         //println("PARTIAL COUNT = %s, DISTINCE PARTIAL COUNT = %s".format(clusterOrdering.size, clusterOrdering.distinct.size))
 
+        println("Partial Clustering Finished ")
         clusterOrdering
     }
 
@@ -376,6 +381,7 @@ class Optics private (
         var partialClusterOrderings = partialClusters.cache()
 
         while (partialClusterOrderings.getNumPartitions > 1) {
+            println("MERGE STEP : REMAINING PARTITION NUM = %s".format(partialClusterOrderings.getNumPartitions))
             partialClusterOrderings = partialClusterOrderings.mapPartitionsWithIndex(
                 (index, iterator) => {
                     val tempList = iterator.toList
@@ -396,6 +402,7 @@ class Optics private (
                         p1._2.bounds(0).lower, p1._2.bounds(0).upper, p1._2.bounds(1).lower, p1._2.bounds(1).upper,
                         p2._2.bounds(0).lower, p2._2.bounds(0).upper, p2._2.bounds(1).lower, p2._2.bounds(1).upper
                     ))*/
+                    println("MERGE !")
                     val mergeResult = merge(p1._1, p2._1, p1._2, p2._2)
                     //println("MERGE RESULT SIZE = %s".format(mergeResult.size))
                     val newBox = boxes.find( _.mergeId == p1._2.mergeId ).get
@@ -763,22 +770,35 @@ object Optics {
 
     private val noiseId = -1
 
+    var numOfExecterNodes = 2
+    var maxEntriesForRTree = 0
+
     def train (
         data: RDD[Array[Double]],
         epsilon: Double,
         minPts: Int): OpticsModel = {
-        new Optics().setEpsilon(epsilon)
+
+        val startTime = System.nanoTime()
+        val result = new Optics().setEpsilon(epsilon)
             .setMinPts(minPts)
             .run(data)
+
+        val endTime = System.nanoTime()
+
+        println("finished!")
+        println("ELAPSED TIME = %s ms".format( (endTime - startTime) / 1000000.0 ))
+
+        result
     }
 
     def extractClusterOrdering (
         clusterOrdering: ClusterOrdering,
-        epsilon: Double ): ClusterOrdering = {
+        epsilon: Double ): (ClusterOrdering, Int) = {
 
         var clusterId = noiseId
 
-        clusterOrdering.map(
+
+        ( clusterOrdering.map(
             p => {
                 p.reachDist match {
                     case Some(d) => {
@@ -808,8 +828,8 @@ object Optics {
                 }
                 p
             }
-        )
-
+        ),
+        clusterId )
     }
 
 }

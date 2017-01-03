@@ -64,8 +64,9 @@ class PartitionIndexer (
 
 object PartitionIndexer extends DistanceCalculator {
 
-    private val maxEntries = 4
-    private val minEntries = 2
+    //private val maxEntries = 4
+    private val maxEntries = Optics.maxEntriesForRTree
+    //private val minEntries = 2
 
     /**
     * build R-tree by Sort-Tile-Recursive(STR) algorithm
