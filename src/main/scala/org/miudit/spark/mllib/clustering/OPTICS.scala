@@ -93,7 +93,7 @@ class Optics private (
             it.map(x => println("mergeId = %s".format(x._1)))
         }.toIterator ).collect*/
 
-        partialClusters.cache()
+        //partialClusters.cache()
 
         //partitionedData.take(100).foreach(x => println(x._2.coreDist))
         //partialClusters.take(100).foreach(x => x._2._1.map(p => println(p.coreDist)))
@@ -378,7 +378,7 @@ class Optics private (
         //println("OVERLAP SIZE = %s".format(overlapping.toList(0).coordinates(0)))
         //overlapping.toList.map(p => "POINT (%s, %s) IS OVERLAPPING !".format(p.coordinates(0), p.coordinates(1)))
 
-        var partialClusterOrderings = partialClusters.cache()
+        var partialClusterOrderings = partialClusters//.cache()
 
         while (partialClusterOrderings.getNumPartitions > 1) {
             println("MERGE STEP : REMAINING PARTITION NUM = %s".format(partialClusterOrderings.getNumPartitions))

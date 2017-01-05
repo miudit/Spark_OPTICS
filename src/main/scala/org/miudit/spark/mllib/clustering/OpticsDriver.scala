@@ -15,7 +15,8 @@ object OpticsDriver {
         Optics.maxEntriesForRTree = args(4).toInt
         val conf = new SparkConf().setAppName("OPTICS")
         val sc = new SparkContext(conf)
-        val inputCSV = sc.textFile(inputFile, 2).cache()
+        sc.setLogLevel("INFO")
+        val inputCSV = sc.textFile(inputFile, 2)//.cache()
 
         val inputData: RDD[Array[Double]] = inputCSV.map(
             line => {
@@ -26,11 +27,8 @@ object OpticsDriver {
         val opticsResult = Optics.train(inputData, epsilon, minPts)
 
         opticsResult.points.collect.foreach(
-            //co => co.map( x => println("CLUSTER ID = %s, POINT = (%s, %s), coreDist = %s, reachDist = %s".format(x.clusterId, x.coordinates(0), x.coordinates(1), x.coreDist, x.reachDist)) )
-            co => None
+            co => co.map( x => println("CLUSTER ID = %s, POINT = (%s, %s), coreDist = %s, reachDist = %s".format(x.clusterId, x.coordinates(0), x.coordinates(1), x.coreDist, x.reachDist)) )
+            //co => None
         )
-
-        while(true)
-            None
     }
 }
