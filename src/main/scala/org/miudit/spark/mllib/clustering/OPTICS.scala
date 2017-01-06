@@ -82,7 +82,7 @@ class Optics private (
                 Vector((idx, partitionBoundingBox, pts)).toIterator
             }, preservesPartitioning = true
         ).toArray
-        .map( x => new PartitionIndexer(x._2, x._3.toIterable, epsilon, minPts) )
+        .map( x => new PartitionIndexer(x._2, x._3.toIterable, epsilon, minPts, x._1) )
         .toIterable
 
         val broadcastIndexers = data.sparkContext.broadcast(indexers)
@@ -91,10 +91,12 @@ class Optics private (
         val partialClusters = partitionedData.mapPartitionsWithIndex (
             (partitionIndex, it) => {
                 val boxes = broadcastBoxes.value
+                val indexers = broadcastIndexers.value
                 //println("partitionIndex = %s".format(partitionIndex))
                 //println("partitionSize = %s".format(it.size))
                 //println("partitionIterator = %s".format(it))
                 val partitionBoundingBox = boxes.find(  _.partitionId == partitionIndex ).get
+                val partitionIndexer = indexers.find( _.partitionIndex == partitionIndex ).get
                 //println("partitionBoundingBox = %s".format(partitionBoundingBox))
                 //val partialResult = partialClustering(it, partitionBoundingBox)
                 //println("partialResult = %s".format(partialResult))

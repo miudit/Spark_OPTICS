@@ -10,7 +10,8 @@ class PartitionIndexer (
     val partitionBox: Box,
     val points: Iterable[MutablePoint],
     val epsilon: Double,
-    val minPts: Int ) extends DistanceCalculator with Serializable {
+    val minPts: Int,
+    val partitionIndex: Int = -1 ) extends DistanceCalculator with Serializable {
 
     /*val mostright = points.maxBy(_.coordinates(0))
     val mostleft = points.minBy(_.coordinates(0))
