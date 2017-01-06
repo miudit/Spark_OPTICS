@@ -75,8 +75,21 @@ class Optics private (
                 //println("partitionIterator = %s".format(it))
                 val partitionBoundingBox = boxes.find(  _.partitionId == partitionIndex ).get
                 //println("partitionBoundingBox = %s".format(partitionBoundingBox))
-                val partialResult = partialClustering(it, partitionBoundingBox)
+                //val partialResult = partialClustering(it, partitionBoundingBox)
                 //println("partialResult = %s".format(partialResult))
+                var tempPointId: Long = 0
+                var co = new ClusterOrdering
+                val points = it.map {
+                    x => {
+                        tempPointId += 1
+                        var newPt = new MutablePoint(x._2, tempPointId)
+
+                        (tempPointId, newPt)
+                    }
+                }
+                var partitionIndexer = new PartitionIndexer(boundingBox, points.values, epsilon, minPts)
+                points.foreach(p => co.append(p._2))
+                val partialResult = co
                 Vector( (partitionBoundingBox.mergeId, (partialResult, partitionBoundingBox)) ).toIterator
             },
             preservesPartitioning = true
