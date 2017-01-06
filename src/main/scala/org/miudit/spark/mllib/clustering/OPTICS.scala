@@ -86,8 +86,8 @@ class Optics private (
 
                         (tempPointId, newPt)
                     }
-                }
-                var partitionIndexer = new PartitionIndexer(boundingBox, points.values, epsilon, minPts)
+                }.toMap
+                var partitionIndexer = new PartitionIndexer(partitionBoundingBox, points.values, epsilon, minPts)
                 points.foreach(p => co.append(p._2))
                 val partialResult = co
                 Vector( (partitionBoundingBox.mergeId, (partialResult, partitionBoundingBox)) ).toIterator
