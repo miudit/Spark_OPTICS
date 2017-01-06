@@ -444,7 +444,8 @@ class Optics private (
                         p2._2.bounds(0).lower, p2._2.bounds(0).upper, p2._2.bounds(1).lower, p2._2.bounds(1).upper
                     ))*/
                     println("MERGE !")
-                    val mergeResult = merge(p1._1, p2._1, p1._2, p2._2)
+                    //val mergeResult = merge(p1._1, p2._1, p1._2, p2._2)
+                    val mergeResult = p1._1 ++ p2._1
                     //println("MERGE RESULT SIZE = %s".format(mergeResult.size))
                     val newBox = boxes.find( _.mergeId == p1._2.mergeId ).get
                     //println("NEW BOX = %s".format(newBox))
