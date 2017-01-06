@@ -66,6 +66,25 @@ class Optics private (
 
         val broadcastBoxes = data.sparkContext.broadcast(partitionedData.boxes)
 
+        val a = partitionedData.mapPartitionsWithIndex(
+            (idx, it) => {
+                val boxes = broadcastBoxes.value
+                val partitionBoundingBox = boxes.find(  _.partitionId == idx ).get
+                var tempPointId: Long = 0
+                val pts = it.map {
+                    x => {
+                        tempPointId += 1
+                        var newPt = new MutablePoint(x._2, tempPointId)
+
+                        newPt
+                    }
+                }.toList
+                Vector((idx, partitionBoundingBox, pts)).toIterator
+            }, preservesPartitioning = true
+        ).toArray
+
+        val b = a.map( x => new PartitionIndexer(x._2, x._3.toIterable, epsilon, minPts) )
+
         println("START PARTIAL CLUSTERING")
         val partialClusters = partitionedData.mapPartitionsWithIndex (
             (partitionIndex, it) => {
@@ -87,7 +106,7 @@ class Optics private (
                         (tempPointId, newPt)
                     }
                 }.toMap
-                var partitionIndexer = new PartitionIndexer(partitionBoundingBox, points.values, epsilon, minPts)
+                //var partitionIndexer = new PartitionIndexer(partitionBoundingBox, points.values, epsilon, minPts)
                 var priorityQueue = new PriorityQueue[MutablePoint]()(Ordering.by[MutablePoint, Double](_.reachDist.get).reverse)
                 points.foreach(p => co.append(p._2))
                 val partialResult = co
