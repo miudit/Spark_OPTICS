@@ -88,6 +88,7 @@ class Optics private (
                     }
                 }.toMap
                 var partitionIndexer = new PartitionIndexer(partitionBoundingBox, points.values, epsilon, minPts)
+                var priorityQueue = new PriorityQueue[MutablePoint]()(Ordering.by[MutablePoint, Double](_.reachDist.get).reverse)
                 points.foreach(p => co.append(p._2))
                 val partialResult = co
                 Vector( (partitionBoundingBox.mergeId, (partialResult, partitionBoundingBox)) ).toIterator
