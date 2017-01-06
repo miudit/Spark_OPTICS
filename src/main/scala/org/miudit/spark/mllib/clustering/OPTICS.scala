@@ -68,6 +68,7 @@ class Optics private (
 
         val indexers = partitionedData.mapPartitionsWithIndex(
             (idx, it) => {
+                println("IDX = %s".format(idx))
                 val boxes = broadcastBoxes.value
                 val partitionBoundingBox = boxes.find(  _.partitionId == idx ).get
                 var tempPointId: Long = 0
@@ -97,10 +98,11 @@ class Optics private (
                 //println("partitionIterator = %s".format(it))
                 val partitionBoundingBox = boxes.find(  _.partitionId == partitionIndex ).get
                 val partitionIndexer = indexers.find( _.partitionIndex == partitionIndex ).get
+                println("PARTITION INDEXER POINT SIZE = %s".format(partitionIndexer.points.size))
                 //println("partitionBoundingBox = %s".format(partitionBoundingBox))
-                //val partialResult = partialClustering(it, partitionBoundingBox)
+                val partialResult = partialClustering(it, partitionBoundingBox, partitionIndexer)
                 //println("partialResult = %s".format(partialResult))
-                var tempPointId: Long = 0
+                /*var tempPointId: Long = 0
                 var co = new ClusterOrdering
                 val points = it.map {
                     x => {
@@ -113,7 +115,7 @@ class Optics private (
                 //var partitionIndexer = new PartitionIndexer(partitionBoundingBox, points.values, epsilon, minPts)
                 var priorityQueue = new PriorityQueue[MutablePoint]()(Ordering.by[MutablePoint, Double](_.reachDist.get).reverse)
                 points.foreach(p => co.append(p._2))
-                val partialResult = co
+                val partialResult = co*/
                 Vector( (partitionBoundingBox.mergeId, (partialResult, partitionBoundingBox)) ).toIterator
             },
             preservesPartitioning = true
@@ -173,19 +175,22 @@ class Optics private (
 
     private def partialClustering (
         it: Iterator[(PointSortKey, Point)],
-        boundingBox: Box ): ClusterOrdering = {
+        boundingBox: Box,
+        partitionIndexer: PartitionIndexer): ClusterOrdering = {
 
         var tempPointId: Long = 0
-        var points = it.map {
+        /*var points = it.map {
             x => {
                 tempPointId += 1
                 var newPt = new MutablePoint(x._2, tempPointId)
 
                 (tempPointId, newPt)
             }
-        }.toMap
+        }.toMap*/
 
-        var partitionIndexer = new PartitionIndexer(boundingBox, points.values, epsilon, minPts)
+        var points = partitionIndexer.points
+
+        //var partitionIndexer = new PartitionIndexer(boundingBox, points.values, epsilon, minPts)
         var priorityQueue = new PriorityQueue[MutablePoint]()(Ordering.by[MutablePoint, Double](_.reachDist.get).reverse)
         var clusterOrdering = new ClusterOrdering
 
@@ -200,11 +205,11 @@ class Optics private (
             println("expand finished! point's is processed = %s".format(point.processed))
             //println("i am here")
         }*/
-        points.values.foreach(
+        points.foreach(
             p => {
                 if ( !p.processed ) {
                     //println("next expand pointId = %s".format(p.pointId))
-                    expand(p, points, partitionIndexer, priorityQueue, clusterOrdering)
+                    expand(p, partitionIndexer, priorityQueue, clusterOrdering)
                     //println("expand finished! point's is processed = %s".format(p.processed))
                 }
             }
@@ -232,7 +237,6 @@ class Optics private (
 
     private def expand (
         startPoint: MutablePoint,
-        points: Map[Long, MutablePoint],
         partitionIndexer: PartitionIndexer,
         priorityQueue: PriorityQueue[MutablePoint],
         clusterOrdering: ClusterOrdering ): Unit = {
