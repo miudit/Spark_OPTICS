@@ -101,6 +101,7 @@ class Optics private (
                 println("PARTITION INDEXER POINT SIZE = %s".format(partitionIndexer.points.size))
                 //println("partitionBoundingBox = %s".format(partitionBoundingBox))
                 val partialResult = partialClustering(it, partitionBoundingBox, partitionIndexer)
+                println("PARTIAL SIZE = %s".format(partialResult.size))
                 //println("partialResult = %s".format(partialResult))
                 /*var tempPointId: Long = 0
                 var co = new ClusterOrdering
@@ -402,7 +403,7 @@ class Optics private (
 
         //partialClusters.foreachPartition(x => println("SIZE = %s".format(x.size)))
 
-        val tp1 = new Point(Array(10.0, 10.0))
+        /*val tp1 = new Point(Array(10.0, 10.0))
         val tp2 = new Point(Array(20.0, 10.0))
         val tp3 = new Point(Array(10.2, 10.4))
         val tmp1 = new MutablePoint(tp1, 0)
@@ -411,7 +412,7 @@ class Optics private (
         val tplist = Array(tmp1, tmp2, tmp3)
         val tbounds = Array(new BoundsInOneDimension(9.0, 11.0), new BoundsInOneDimension(9.0, 11.0))
         val tbox = new Box(tbounds)
-        val overlapping = tbox.overlapPoints(tplist)
+        val overlapping = tbox.overlapPoints(tplist)*/
         //println("OVERLAPPING DETECTION")
         //println("P1 = (%s, %s), P2 = (%s, %s)".format(tmp1.coordinates(0), tmp1.coordinates(1), tmp2.coordinates(0), tmp2.coordinates(1)))
         //println("BOUNDS = (%s, %s), (%s, %s)".format(tbounds(0).lower, tbounds(0).upper, tbounds(1).lower, tbounds(1).upper ))
@@ -419,10 +420,34 @@ class Optics private (
         //println("OVERLAP SIZE = %s".format(overlapping.toList(0).coordinates(0)))
         //overlapping.toList.map(p => "POINT (%s, %s) IS OVERLAPPING !".format(p.coordinates(0), p.coordinates(1)))
 
-        var partialClusterOrderings = partialClusters//.cache()
+        var partialClusterOrderings = partialClusters.cache()
 
         while (partialClusterOrderings.getNumPartitions > 1) {
             println("MERGE STEP : REMAINING PARTITION NUM = %s".format(partialClusterOrderings.getNumPartitions))
+
+            val broadcastCO = partialClusterOrderings.sparkContext.broadcast(partialClusterOrderings.toArray)
+
+            val indexers = partialClusterOrderings.mapPartitions(
+                it => {
+                    val content = it.toList.head
+                    val expandedBox = content._2._2.expand(epsilon)
+                    val co1 = content._2._1
+                    println("co1 size = %s".format(co1.size))
+                    val mergeId = content._1
+                    val points1 = co1.toIterable.map( p => { p.processed = false; p} )
+                    /* mergeIdを見て隣接するパーティションの点群(co2)をget */
+                    val points2 = broadcastCO.value
+                        .find( x => x._1/10 == mergeId/10 && x._1 != mergeId ).get._2._1
+                        .map( p => { p.processed = false; p} )
+                    val expandedPoints1 = points1 ++ expandedBox.overlapPoints(points2)
+                    Vector((expandedBox, expandedPoints1, mergeId)).toIterator
+                }, preservesPartitioning = true
+            ).toArray
+            .map( x => new PartitionIndexer(x._1, x._2, epsilon, minPts, x._3) )
+            .toIterable
+
+            val broadcastIndexers = partialClusters.sparkContext.broadcast(indexers)
+
             partialClusterOrderings = partialClusterOrderings.mapPartitionsWithIndex(
                 (index, iterator) => {
                     val tempList = iterator.toList
@@ -431,7 +456,8 @@ class Optics private (
 
                     val temp = tempList.map(
                         p => {
-                            (p._1/10, p._2)
+                            //val indexer = broadcastIndexers.value.find( _.partitionIndex == p._1 ).get
+                            (p._1/10, (p._2._1, p._2._2))
                         }
                     ).toIterator
                     temp
@@ -443,9 +469,11 @@ class Optics private (
                         p1._2.bounds(0).lower, p1._2.bounds(0).upper, p1._2.bounds(1).lower, p1._2.bounds(1).upper,
                         p2._2.bounds(0).lower, p2._2.bounds(0).upper, p2._2.bounds(1).lower, p2._2.bounds(1).upper
                     ))*/
+                    val indexer1 = broadcastIndexers.value.find( _.partitionIndex == p1._2.mergeId ).get
+                    val indexer2 = broadcastIndexers.value.find( _.partitionIndex == p2._2.mergeId ).get
                     println("MERGE !")
-                    //val mergeResult = merge(p1._1, p2._1, p1._2, p2._2)
-                    val mergeResult = p1._1 ++ p2._1
+                    val mergeResult = merge(p1._1, p2._1, indexer1, indexer2)
+                    //val mergeResult = p1._1 ++ p2._1
                     //println("MERGE RESULT SIZE = %s".format(mergeResult.size))
                     val newBox = boxes.find( _.mergeId == p1._2.mergeId ).get
                     //println("NEW BOX = %s".format(newBox))
@@ -461,11 +489,13 @@ class Optics private (
     private def merge (
         co1: ClusterOrdering,
         co2: ClusterOrdering,
-        box1: Box,
-        box2: Box ): ClusterOrdering = {
+        indexer1: PartitionIndexer,
+        indexer2: PartitionIndexer ): ClusterOrdering = {
 
-        val expandedBox1 = box1.expand(epsilon)
-        val expandedBox2 = box2.expand(epsilon)
+        //val expandedBox1 = box1.expand(epsilon)
+        //val expandedBox2 = box2.expand(epsilon)
+        val expandedBox1 = indexer1.partitionBox
+        val expandedBox2 = indexer2.partitionBox
 
         /*println("+++++++++++++++++++")
         println("EXPANDED BOX1 = (%s, %s), (%s, %s)".format(
@@ -480,13 +510,13 @@ class Optics private (
         val points1 = co1.toIterable.map( p => { p.processed = false; p} )
         val points2 = co2.toIterable.map( p => { p.processed = false; p} )
 
-        val mostright = points1.maxBy(_.coordinates(0))
-        val mostleft = points1.minBy(_.coordinates(0))
+        //val mostright = points1.maxBy(_.coordinates(0))
+        //val mostleft = points1.minBy(_.coordinates(0))
         //println("MOST RIGHT POINT = (%s, %s)".format(mostright.coordinates(0), mostright.coordinates(1)))
         //println("MOST LEFT POINT = (%s, %s)".format(mostleft.coordinates(0), mostleft.coordinates(1)))
 
-        val mostright2 = points2.maxBy(_.coordinates(0))
-        val mostleft2 = points2.minBy(_.coordinates(0))
+        //val mostright2 = points2.maxBy(_.coordinates(0))
+        //val mostleft2 = points2.minBy(_.coordinates(0))
         //println("MOST RIGHT POINT = (%s, %s)".format(mostright2.coordinates(0), mostright2.coordinates(1)))
         //println("MOST LEFT POINT = (%s, %s)".format(mostleft2.coordinates(0), mostleft2.coordinates(1)))
 
@@ -500,8 +530,8 @@ class Optics private (
 
         //println("HERE C")
 
-        val indexer1 = new PartitionIndexer(expandedBox1, expandedPoints1, epsilon, minPts)
-        val indexer2 = new PartitionIndexer(expandedBox2, expandedPoints2, epsilon, minPts)
+        //val indexer1 = new PartitionIndexer(expandedBox1, expandedPoints1, epsilon, minPts)
+        //val indexer2 = new PartitionIndexer(expandedBox2, expandedPoints2, epsilon, minPts)
 
         //println("HERE D")
 
