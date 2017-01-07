@@ -76,9 +76,7 @@ class Optics private (
 
         val extractedResult = mergedClusters.map (
             co => {
-                val result = Optics.extractClusterOrdering(co, epsilon)
-                println("RESULT CLUSTER SIZE = %s".format(result._2))
-                result._1
+                Optics.extractClusterOrdering(co, epsilon)
             }
         )
 
@@ -558,7 +556,6 @@ object Optics {
 
         val endTime = System.nanoTime()
 
-        println("finished!")
         println("ELAPSED TIME = %s ms".format( (endTime - startTime) / 1000000.0 ))
 
         result
@@ -578,7 +575,6 @@ object Optics {
                         if ( p.reachDist.get > epsilon ) {
                             if ( p.coreDist != -1 && p.coreDist <= epsilon ) {
                                 clusterId = clusterId + 1
-                                //println("ID CHANGED")
                                 p.clusterId = clusterId
                             }
                             else {

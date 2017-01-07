@@ -26,9 +26,9 @@ object OpticsDriver {
 
         val opticsResult = Optics.train(inputData, epsilon, minPts)
 
-        opticsResult.points.collect.foreach(
+        opticsResult.result.collect.foreach(
             //co => co.map( x => println("CLUSTER ID = %s, POINT = (%s, %s), coreDist = %s, reachDist = %s".format(x.clusterId, x.coordinates(0), x.coordinates(1), x.coreDist, x.reachDist)) )
-            co => None
+            co => println("RESULT CLUSTER SIZE = %s".format(co._2))
         )
     }
 }
