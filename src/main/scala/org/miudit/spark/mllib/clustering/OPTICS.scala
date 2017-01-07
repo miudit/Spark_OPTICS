@@ -145,12 +145,13 @@ class Optics private (
         //broadcastBoxes.destroy()
         //partialClusters.toLocalIterator.foreach( x => println("mergeId = %s".format(x._1)) )
 
-        val partitionIdsToMergeIds = partitionedData.boxes.map ( x => (x.partitionId, x.mergeId) ).toMap
+        println("all boxes size = %s".format(partitionedData.allBoxes.size))
+        //val partitionIdsToMergeIds = partitionedData.boxes.map ( x => (x.partitionId, x.mergeId) ).toMap
         //println("partitionIdsToMergeIds = %s".format(partitionIdsToMergeIds))
 
         println("START MERGING")
         //val mergedClusters = mergeClusters(partialClusters, partitionedData.boxes, partitionIdsToMergeIds)
-        var mergedClusters = mergeClusters(partialClusters, partitionedData.boxes, partitionIdsToMergeIds)
+        var mergedClusters = mergeClusters(partialClusters, partitionedData.boxes, partitionedData.allBoxes)
 
         assert(mergedClusters.partitions.size == 1, "Merged Clusters RDD Partition Size != 1")
 
@@ -391,15 +392,13 @@ class Optics private (
     private def mergeClusters (
         partialClusters: RDD[(Int, (ClusterOrdering, Box))],
         boxes: Iterable[Box],
-        partitionIdsToMergeIds: Map[Int, Int] ): RDD[ClusterOrdering] = {
+        allBoxes: Iterable[Box] ): RDD[ClusterOrdering] = {
 
         /*partialClusters.treeAggregate()(
             seqOp: (org.apache.spark.rdd.RDD.U, org.miudit.spark.mllib.clustering.MutablePoint) => org.apache.spark.rdd.RDD.U,
             combOp: (org.apache.spark.rdd.RDD.U, org.apache.spark.rdd.RDD.U) => org.apache.spark.rdd.RDD.U,
             BoxCalculator.maxTreeLevel
         )*/
-
-        //var partitionIdsToMergeIds: Map[Int, Int] = partitionIdsToMergeIds
 
         //partialClusters.foreachPartition(x => println("SIZE = %s".format(x.size)))
 
@@ -475,7 +474,8 @@ class Optics private (
                     val mergeResult = merge(p1._1, p2._1, indexer1, indexer2)
                     //val mergeResult = p1._1 ++ p2._1
                     //println("MERGE RESULT SIZE = %s".format(mergeResult.size))
-                    val newBox = boxes.find( _.mergeId == p1._2.mergeId ).get
+                    //val newBox = boxes.find( _.mergeId == p1._2.mergeId/10 ).get
+                    val newBox = allBoxes.find( _.mergeId == p1._2.mergeId/10 ).get
                     //println("NEW BOX = %s".format(newBox))
                     ( mergeResult, newBox )
                 },

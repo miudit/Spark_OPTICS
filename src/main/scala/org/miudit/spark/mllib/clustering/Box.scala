@@ -188,7 +188,7 @@ class BoxCalculator (val data: RDD[Point]) {
 
     val numOfDimensions: Int = getNumOfDimensions(data)
 
-    def generateBoxes (epsilon: Double, minPts: Int): (Iterable[Box], Box) = {
+    def generateBoxes (epsilon: Double, minPts: Int): (Iterable[Box], Box, Iterable[Box]) = {
 
         val bounds = calculateBounds(data, numOfDimensions)
         val rootBox = new Box(bounds.toArray, 0)
@@ -200,6 +200,8 @@ class BoxCalculator (val data: RDD[Point]) {
         val boxes = boxTree.flattenBoxes(x => true)
             .zipWithIndex.map( x => x._1.setBoxId(x._2) )
 
+        val allBoxes = boxTree.flattenBoxes
+
         /*boxes.iterator.foreach(it => {
             println(it)
             it.bounds.iterator.foreach(x => println("lower=%s, upper=%s".format(x.lower, x.upper)))
@@ -207,7 +209,7 @@ class BoxCalculator (val data: RDD[Point]) {
 
         //rootBox.bounds.iterator.foreach( x => println("bounding box lower = %s, upper=%s".format(x.lower, x.upper)) )
 
-        (BoxPartitioner.assignPartitionIdsToBoxes(boxes), rootBox)
+        (BoxPartitioner.assignPartitionIdsToBoxes(boxes), rootBox, allBoxes)
         //(boxes, rootBox)
 
     }
