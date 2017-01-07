@@ -14,7 +14,6 @@ class Box (
     var mergeId = 1
 
     def contains (point: Point) = {
-        //bounds.zip(point.coordinates).foreach(x => println("bound = (%s, %s), double = %s".format(x._1.lower, x._1.upper, x._2)))
         bounds.zip (point.coordinates).forall( x => x._1.contains(x._2) )
     }
 
@@ -41,27 +40,17 @@ class Box (
         val (longestDimension, idx) = findLongestDimensionAndItsIndex()
         val beforeLongest = if (idx > 0) bounds.take (idx) else Array[BoundsInOneDimension] ()
         val afterLongest = if (idx < bounds.size-1) bounds.drop(idx+1) else Array[BoundsInOneDimension] ()
-        //val splits = longestDimension.split(2)
         val median = findMedian(idx, points)
-        //println("MEDIAN = %s".format(median))
         val splits = longestDimension.splitWhere(median)
         splits.zipWithIndex.map {
             s => {
                 val newBounds = (beforeLongest :+ s._1) ++: afterLongest
-                //val newMergeId: Int = 10 * String.valueOf(mergeId).length() * mergeId + s._2
                 val newMergeId: Int = 10 * mergeId + s._2
                 val newBox = new Box (newBounds, boxIdGenerator.getNextId())
                 newBox.mergeId = newMergeId
                 (newBox, newBox.overlapPoints(points.map(x => new MutablePoint(x, 0))))
             }
         }
-        /*splits.zipWithIndex.map {
-            s => {
-                val newBounds = (beforeLongest :+ s._1) ++: afterLongest
-                val newPartitionId = String.valueOf(partitionId).length() * partitionId + s._2
-                new Box (newBounds, boxIdGenerator.getNextId(), newPartitionId)
-            }
-        }*/
     }
 
     def findMedian (index: Int, points: Iterable[Point]): Double = {
@@ -83,21 +72,8 @@ class Box (
         overlap
     }
 
-    /*def combineBoxes (box: Box): Box = {
-        val newBounds = bounds.zip(box.bounds).map(
-            b => {
-                val a = b
-            }
-        )
-
-        new Box()
-    }*/
-
     def overlapPoints(points: Iterable[MutablePoint]): Iterable[MutablePoint] = {
-        //println("FFF SIZE = %s".format(points.size))
-        val result = points.filter( p => contains(p) )
-        //println("RESULT SIZE = %s".format(result.size))
-        result
+        points.filter( p => contains(p) )
     }
 
     private def findLongestDimensionAndItsIndex(): (BoundsInOneDimension, Int) = {
@@ -188,7 +164,7 @@ class BoxCalculator (val data: RDD[Point]) {
 
     val numOfDimensions: Int = getNumOfDimensions(data)
 
-    def generateBoxes (epsilon: Double, minPts: Int): (Iterable[Box], Box) = {
+    def generateBoxes (epsilon: Double, minPts: Int): (Iterable[Box], Box, Iterable[Box]) = {
 
         val bounds = calculateBounds(data, numOfDimensions)
         val rootBox = new Box(bounds.toArray, 0)
@@ -200,16 +176,9 @@ class BoxCalculator (val data: RDD[Point]) {
         val boxes = boxTree.flattenBoxes(x => true)
             .zipWithIndex.map( x => x._1.setBoxId(x._2) )
 
-        /*boxes.iterator.foreach(it => {
-            println(it)
-            it.bounds.iterator.foreach(x => println("lower=%s, upper=%s".format(x.lower, x.upper)))
-        })*/
+        val allBoxes = boxTree.flattenBoxes
 
-        //rootBox.bounds.iterator.foreach( x => println("bounding box lower = %s, upper=%s".format(x.lower, x.upper)) )
-
-        (BoxPartitioner.assignPartitionIdsToBoxes(boxes), rootBox)
-        //(boxes, rootBox)
-
+        (BoxPartitioner.assignPartitionIdsToBoxes(boxes), rootBox, allBoxes)
     }
 
     private def getNumOfDimensions (data: RDD[Point]): Int = {
@@ -237,14 +206,10 @@ class BoxCalculator (val data: RDD[Point]) {
 
 private object BoxCalculator {
 
-    //val maxTreeLevel = 1 // log(partitionNum)
-    //var maxTreeLevel = Math.ceil(Math.pow(Optics.numOfExecterNodes, 1.0/2)).toInt
     var maxTreeLevel = Math.round(Math.pow(Optics.numOfExecterNodes, 1.0/2)).toInt
     if ( Optics.numOfExecterNodes == 1 ) {
         maxTreeLevel = 0
     }
-
-    println("TREE LEVEL = %s".format(maxTreeLevel))
 
     def generateTree (root: Box, points: Iterable[Point], treeLevel: Int): BoxTreeNode = {
 
@@ -310,7 +275,6 @@ class BoxTreeNode (box: Box) extends BoxTreeNodeBase[BoxTreeNode] (box) with Ser
 
 class BoxTreeNodeWithPoints (
     box: Box,
-    //val points: SynchronizedArrayBuffer[Point] = new SynchronizedArrayBuffer[Point]()
     val points: Iterable[Point] = Nil,
     val isLeaf: Boolean = false
     ) extends BoxTreeNodeBase[BoxTreeNodeWithPoints](box) {

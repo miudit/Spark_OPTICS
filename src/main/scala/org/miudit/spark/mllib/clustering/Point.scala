@@ -59,7 +59,6 @@ class PointSortKey (point: Point) extends Ordered[PointSortKey] with Serializabl
 class PointIndexer (val numOfPartitions: Int, val currentPartition: Int) {
 
     val multiplier = computeMultiplier (numOfPartitions)
-    //println("MULTIPLIER = %s".format(multiplier))
     var currentIndex: Long = 0
 
     def getNextIndex: Long = {
@@ -103,12 +102,6 @@ object PointIndexer {
                 (new PointSortKey (newPoint), newPoint)
             })
         })
-
-        /*data.map(
-            p => {
-
-            }
-        )*/
 
     }
 }

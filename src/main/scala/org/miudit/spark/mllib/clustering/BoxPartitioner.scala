@@ -6,9 +6,6 @@ class BoxPartitioner (val boxes: Iterable[Box]) extends Partitioner {
 
     assert (boxes.forall(_.partitionId >= 0))
 
-    //boxes.foreach( b => println("partition id = %s".format(b.partitionId)) )
-    //boxes.foreach( b => println("box id = %s".format(b.boxId)) )
-
     private val boxIdsToPartitions = boxes.map ( x => (x.boxId, x.partitionId) ).toMap
 
     override def numPartitions: Int = boxes.size
@@ -19,7 +16,6 @@ class BoxPartitioner (val boxes: Iterable[Box]) extends Partitioner {
             case boxId: Int => boxIdsToPartitions(boxId)
             case pt: Point => boxIdsToPartitions(pt.boxId)
             case _ => {
-                //println("here")
                 0
             } // throw an exception?
         }
