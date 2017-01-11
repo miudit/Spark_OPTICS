@@ -276,10 +276,13 @@ class Optics private (
             )
             .reduceByKey(
                 (p1, p2) => {
+                    val startTime = System.nanoTime()
                     val indexer1 = broadcastIndexers.value.find( _.partitionIndex == p1._2.mergeId ).get
                     val indexer2 = broadcastIndexers.value.find( _.partitionIndex == p2._2.mergeId ).get
                     val mergeResult = merge(p1._1, p2._1, indexer1, indexer2)
                     val newBox = allBoxes.find( _.mergeId == p1._2.mergeId/10 ).get
+                    val endTime = System.nanoTime()
+                    println("MERGE TIME = %s ms".format(endTime-startTime/ 1000000.0))
                     ( mergeResult, newBox )
                 },
                 partialClusterOrderings.getNumPartitions/2

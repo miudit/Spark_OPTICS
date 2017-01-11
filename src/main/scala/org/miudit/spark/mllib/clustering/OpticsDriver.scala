@@ -16,7 +16,7 @@ object OpticsDriver {
         val conf = new SparkConf().setAppName("OPTICS")
         val sc = new SparkContext(conf)
         sc.setLogLevel("WARN")
-        val inputCSV = sc.textFile(inputFile, 2).cache()
+        val inputCSV = sc.textFile(inputFile).cache()
 
         val inputData: RDD[Array[Double]] = inputCSV.map(
             line => {
