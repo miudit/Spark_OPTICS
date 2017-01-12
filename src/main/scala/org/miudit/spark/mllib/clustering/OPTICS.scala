@@ -238,9 +238,26 @@ class Optics private (
 
         while (partialClusterOrderings.getNumPartitions > 1) {
 
-            val broadcastCO = partialClusterOrderings.sparkContext.broadcast(partialClusterOrderings.toArray)
+            val partialCOArray = partialClusterOrderings.toArray
 
-            val indexers = partialClusterOrderings.mapPartitions(
+            val broadcastCO = partialClusterOrderings.sparkContext.broadcast(partialCOArray)
+
+            val indexers = partialCOArray.map(
+                co => {
+                    val expandedBox = co._2._2.expand(epsilon)
+                    val co1 = co._2._1
+                    val mergeId = co._1
+                    val points1 = co1.toIterable.map( p => { p.processed = false; p} )
+                    val points2 = broadcastCO.value
+                        .find( x => x._1/10 == mergeId/10 && x._1 != mergeId ).get._2._1
+                        .map( p => { p.processed = false; p} )
+                    val expandedPoints1 = points1 ++ expandedBox.overlapPoints(points2)
+                    (expandedBox, expandedPoints1, mergeId)
+                }
+            )
+            .map( x => new PartitionIndexer(x._1, x._2, epsilon, minPts, x._3) )
+
+            /*val indexers = partialClusterOrderings.mapPartitions(
                 it => {
                     val content = it.toList.head
                     val expandedBox = content._2._2.expand(epsilon)
@@ -256,7 +273,7 @@ class Optics private (
                 }, preservesPartitioning = true
             ).toArray
             .map( x => new PartitionIndexer(x._1, x._2, epsilon, minPts, x._3) )
-            .toIterable
+            .toIterable*/
 
             val broadcastIndexers = partialClusters.sparkContext.broadcast(indexers)
 
@@ -276,13 +293,11 @@ class Optics private (
             )
             .reduceByKey(
                 (p1, p2) => {
-                    val startTime = System.nanoTime()
-                    val indexer1 = broadcastIndexers.value.find( _.partitionIndex == p1._2.mergeId ).get
-                    val indexer2 = broadcastIndexers.value.find( _.partitionIndex == p2._2.mergeId ).get
-                    val mergeResult = merge(p1._1, p2._1, indexer1, indexer2)
+                    //val indexer1 = broadcastIndexers.value.find( _.partitionIndex == p1._2.mergeId ).get
+                    //val indexer2 = broadcastIndexers.value.find( _.partitionIndex == p2._2.mergeId ).get
+                    //val mergeResult = merge(p1._1, p2._1, indexer1, indexer2)
+                    val mergeResult = p1._1 ++ p2._1
                     val newBox = allBoxes.find( _.mergeId == p1._2.mergeId/10 ).get
-                    val endTime = System.nanoTime()
-                    println("MERGE TIME = %s ms".format(endTime-startTime/ 1000000.0))
                     ( mergeResult, newBox )
                 },
                 partialClusterOrderings.getNumPartitions/2
@@ -297,6 +312,8 @@ class Optics private (
         co2: ClusterOrdering,
         indexer1: PartitionIndexer,
         indexer2: PartitionIndexer ): ClusterOrdering = {
+
+        val startTime = System.nanoTime()
 
         val expandedBox1 = indexer1.partitionBox
         val expandedBox2 = indexer2.partitionBox
@@ -354,6 +371,9 @@ class Optics private (
         else {
             processClusterOrdering(markedPoints2, markedPoints1, indexer2, markedCO2, newClusterOrdering)
         }
+
+        val endTime = System.nanoTime()
+        println("MERGE TIME = %s ms".format(endTime-startTime/ 1000000.0))
 
         newClusterOrdering
     }
