@@ -313,8 +313,6 @@ class Optics private (
         indexer1: PartitionIndexer,
         indexer2: PartitionIndexer ): ClusterOrdering = {
 
-        val startTime = System.nanoTime()
-
         val expandedBox1 = indexer1.partitionBox
         val expandedBox2 = indexer2.partitionBox
 
@@ -363,17 +361,14 @@ class Optics private (
             newClusterOrdering = newClusterOrdering ++ markedCO1
         }
         else {
-            processClusterOrdering(markedPoints1, markedPoints2, indexer1, markedCO1, newClusterOrdering)
+            processClusterOrdering2(markedPoints1, markedPoints2, indexer1, markedCO1, newClusterOrdering)
         }
         if ( markedCO2.filter(p => p.isAffected).size == 0 ) {
             newClusterOrdering = newClusterOrdering ++ markedCO2
         }
         else {
-            processClusterOrdering(markedPoints2, markedPoints1, indexer2, markedCO2, newClusterOrdering)
+            processClusterOrdering2(markedPoints2, markedPoints1, indexer2, markedCO2, newClusterOrdering)
         }
-
-        val endTime = System.nanoTime()
-        println("MERGE TIME = %s ms".format(endTime-startTime/ 1000000.0))
 
         newClusterOrdering
     }
@@ -433,6 +428,46 @@ class Optics private (
             }
         )
 
+    }
+
+    private def processClusterOrdering2 (
+        points1: Iterable[MutablePoint],
+        points2: Iterable[MutablePoint],
+        indexer: PartitionIndexer,
+        clusterOrdering: ClusterOrdering,
+        newClusterOrdering: ClusterOrdering): Unit = {
+
+        var priorityQueue = new PriorityQueue[MutablePoint]()(Ordering.by[MutablePoint, Double](_.reachDist.get).reverse)
+
+        while ( clusterOrdering.filter(p => !p.processed).size > 0 ) {
+            if (!priorityQueue.isEmpty) {
+                assert( priorityQueue.size > 0, "priorityQueue has no element @ processClusterOrdering" )
+                val q = priorityQueue.dequeue()
+                process(points1, points2, q, indexer, priorityQueue, newClusterOrdering)
+            }
+            else {
+                // PQ is Empty
+                breakable(
+                    for (i <- 0 to clusterOrdering.size-1) {
+                        val p = clusterOrdering(i)
+                        if ( !p.processed ){
+                            if (p.isAffected) {
+                                processAffectedPoint(points1, points2, p, indexer, priorityQueue, newClusterOrdering)
+                                if (!priorityQueue.isEmpty){
+                                    break
+                                }
+                            }
+                        }
+                    }
+                )
+            }
+        }
+
+        while (!priorityQueue.isEmpty) {
+            assert( priorityQueue.size > 0, "priorityQueue has no element @ processClusterOrdering 2" )
+            val q = priorityQueue.dequeue()
+            process(points1, points2, q, indexer, priorityQueue, newClusterOrdering)
+        }
     }
 
     private def processAffectedPoint (
