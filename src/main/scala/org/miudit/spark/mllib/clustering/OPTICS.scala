@@ -293,10 +293,10 @@ class Optics private (
             )
             .reduceByKey(
                 (p1, p2) => {
-                    //val indexer1 = broadcastIndexers.value.find( _.partitionIndex == p1._2.mergeId ).get
-                    //val indexer2 = broadcastIndexers.value.find( _.partitionIndex == p2._2.mergeId ).get
-                    //val mergeResult = merge(p1._1, p2._1, indexer1, indexer2)
-                    val mergeResult = p1._1 ++ p2._1
+                    val indexer1 = broadcastIndexers.value.find( _.partitionIndex == p1._2.mergeId ).get
+                    val indexer2 = broadcastIndexers.value.find( _.partitionIndex == p2._2.mergeId ).get
+                    val mergeResult = merge(p1._1, p2._1, indexer1, indexer2)
+                    //val mergeResult = p1._1 ++ p2._1
                     val newBox = allBoxes.find( _.mergeId == p1._2.mergeId/10 ).get
                     ( mergeResult, newBox )
                 },
@@ -361,13 +361,13 @@ class Optics private (
             newClusterOrdering = newClusterOrdering ++ markedCO1
         }
         else {
-            processClusterOrdering2(markedPoints1, markedPoints2, indexer1, markedCO1, newClusterOrdering)
+            processClusterOrdering(markedPoints1, markedPoints2, indexer1, markedCO1, newClusterOrdering)
         }
         if ( markedCO2.filter(p => p.isAffected).size == 0 ) {
             newClusterOrdering = newClusterOrdering ++ markedCO2
         }
         else {
-            processClusterOrdering2(markedPoints2, markedPoints1, indexer2, markedCO2, newClusterOrdering)
+            processClusterOrdering(markedPoints2, markedPoints1, indexer2, markedCO2, newClusterOrdering)
         }
 
         newClusterOrdering
