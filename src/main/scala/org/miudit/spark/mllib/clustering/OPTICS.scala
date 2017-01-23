@@ -56,6 +56,8 @@ class Optics private (
 
         val broadcastIndexers = data.sparkContext.broadcast(indexers)
 
+        val coAccumulator = data.sparkContext.accumulable(Seq.empty[AccumlableType])(COAccululableParam)
+
         val partialClusters = partitionedData.mapPartitionsWithIndex (
             (partitionIndex, it) => {
 
@@ -65,20 +67,27 @@ class Optics private (
                 val partitionIndexer = indexers.find( _.partitionIndex == partitionIndex ).get
                 val partialResult = partialClustering(it, partitionBoundingBox, partitionIndexer)
 
-                Vector( (partitionBoundingBox.mergeId, (partialResult, partitionBoundingBox)) ).toIterator
+                val result = (partitionBoundingBox.mergeId, (partialResult, partitionBoundingBox))
+                Vector(result).toIterator
             },
             preservesPartitioning = true
-        )
+        ).cache()
 
-        var mergedClusters = mergeClusters(partialClusters, partitionedData.boxes, partitionedData.allBoxes)
+        partialClusters.foreach(coAccumulator += _)
 
-        assert(mergedClusters.partitions.size == 1, "Merged Clusters RDD Partition Size != 1")
+        println("coAccumulator Size = %s".format(coAccumulator.value.size))
 
-        val extractedResult = mergedClusters.map (
+        var mergedCluster = mergeClustersLists(coAccumulator.value, partitionedData.boxes, partitionedData.allBoxes)
+
+        //assert(mergedClusters.partitions.size == 1, "Merged Clusters RDD Partition Size != 1")
+
+        /*val extractedResult = mergedClusters.map (
             co => {
                 Optics.extractClusterOrdering(co, epsilon)
             }
-        )
+        )*/
+
+        val extractedResult = Optics.extractClusterOrdering(mergedCluster, epsilon)
 
         new OpticsModel(extractedResult, epsilon, minPts)
     }
@@ -229,6 +238,41 @@ class Optics private (
         points.find( p => !p.processed )
     }
 
+    private def mergeClustersLists (
+        partialClusters: Seq[(Int, (ClusterOrdering, Box))],
+        boxes: Iterable[Box],
+        allBoxes: Iterable[Box] ): ClusterOrdering = {
+
+        var partialClusterOrderings = partialClusters
+
+        var partitionNum = partialClusters.size
+        var result = Seq.empty ++ partialClusters
+        while ( partitionNum > 1 ) {
+            result =
+                result.groupBy(x => x._1/10) // Map[Int, Seq[(Int, (ArrayBuffer, Box))]]
+                .map(
+                    x => {
+                        assert(x._2.size == 2, "wrong")
+                        val partition1 = x._2(0)
+                        val partition2 = x._2(1)
+                        val currentMergeId = partition1._1
+                        val co1 = partition1._2._1
+                        val co2 = partition2._2._1
+                        val box1 = partition1._2._2
+                        val box2 = partition2._2._2
+                        val mergeResult = merge(co1, co2, box1, box2)
+                        val newMergeId = currentMergeId/10
+                        val newBox = allBoxes.find( _.mergeId == newMergeId ).get
+                        ( newMergeId, (mergeResult, newBox) )
+                    }
+                ).toSeq
+            println("result size= %s".format(result.size))
+            partitionNum = result.size
+        }
+        result(0)._2._1
+    }
+
+    /*
     private def mergeClusters (
         partialClusters: RDD[(Int, (ClusterOrdering, Box))],
         boxes: Iterable[Box],
@@ -256,24 +300,6 @@ class Optics private (
                 }
             )
             .map( x => new PartitionIndexer(x._1, x._2, epsilon, minPts, x._3) )
-
-            /*val indexers = partialClusterOrderings.mapPartitions(
-                it => {
-                    val content = it.toList.head
-                    val expandedBox = content._2._2.expand(epsilon)
-                    val co1 = content._2._1
-                    val mergeId = content._1
-                    val points1 = co1.toIterable.map( p => { p.processed = false; p} )
-                    // get points in neighbor(to be merged) partition
-                    val points2 = broadcastCO.value
-                        .find( x => x._1/10 == mergeId/10 && x._1 != mergeId ).get._2._1
-                        .map( p => { p.processed = false; p} )
-                    val expandedPoints1 = points1 ++ expandedBox.overlapPoints(points2)
-                    Vector((expandedBox, expandedPoints1, mergeId)).toIterator
-                }, preservesPartitioning = true
-            ).toArray
-            .map( x => new PartitionIndexer(x._1, x._2, epsilon, minPts, x._3) )
-            .toIterable*/
 
             val broadcastIndexers = partialClusters.sparkContext.broadcast(indexers)
 
@@ -306,15 +332,16 @@ class Optics private (
 
         partialClusterOrderings.map( co => co._2._1 )
     }
+    */
 
     private def merge (
         co1: ClusterOrdering,
         co2: ClusterOrdering,
-        indexer1: PartitionIndexer,
-        indexer2: PartitionIndexer ): ClusterOrdering = {
+        box1: Box,
+        box2: Box ): ClusterOrdering = {
 
-        val expandedBox1 = indexer1.partitionBox
-        val expandedBox2 = indexer2.partitionBox
+        val expandedBox1 = box1.expand(epsilon)
+        val expandedBox2 = box2.expand(epsilon)
 
         var tempId = 0
 
@@ -323,6 +350,9 @@ class Optics private (
 
         val expandedPoints1 = points1 ++ expandedBox1.overlapPoints(points2)
         val expandedPoints2 = points2 ++ expandedBox2.overlapPoints(points1)
+
+        val indexer1 = new PartitionIndexer(expandedBox1, expandedPoints1, epsilon, minPts)
+        val indexer2 = new PartitionIndexer(expandedBox2, expandedPoints2, epsilon, minPts)
 
         markAffectedPoints(indexer1.boxesTree, indexer2.boxesTree)
 

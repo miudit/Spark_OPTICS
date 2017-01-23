@@ -8,4 +8,6 @@ package object clustering {
 
     type ClusterOrdering = ArrayBuffer[MutablePoint]
 
+    type AccumlableType = (Int, (ClusterOrdering, Box))
+
 }
