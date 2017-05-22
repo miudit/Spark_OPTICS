@@ -19,6 +19,11 @@ object PointPartitions {
         val sc = data.sparkContext
         val boxCalculator = new BoxCalculator(data)
         val (boxes, boundingBox, allBoxes) = boxCalculator.generateBoxes(epsilon, minPts)
+        boxes.foreach( box => {
+            val bound1 = box.bounds(0)
+            val bound2 = box.bounds(1)
+            println("box bound = x:(%s,%s), y:(%s,%s)".format(bound1.lower, bound1.upper, bound2.lower, bound2.upper))
+        })
         val broadcastBoxes = sc.broadcast(boxes)
         val broadcastNumOfDimensions = sc.broadcast(boxCalculator.numOfDimensions)
 

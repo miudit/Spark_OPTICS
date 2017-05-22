@@ -2,9 +2,10 @@ package org.miudit.spark.mllib.clustering
 
 import scala.collection.mutable.{ArrayBuffer, SynchronizedBuffer}
 import org.apache.spark.rdd.RDD
+import scala.collection.mutable.Queue
 
 class Box (
-    val bounds: Array[BoundsInOneDimension],
+    var bounds: Array[BoundsInOneDimension],
     val boxId: Int = 0,
     val partitionId: Int = -1,
     var adjacentBoxes: List[Box] = Nil ) extends Serializable with Ordered[Box] {
@@ -12,6 +13,10 @@ class Box (
     val centerPoint = calculateCenter (bounds)
 
     var mergeId = 1
+
+    def volume (): Double = {
+        bounds.map( bound => bound.upper - bound.lower ).reduce( (a,b) => a*b )
+    }
 
     def contains (point: Point) = {
         bounds.zip (point.coordinates).forall( x => x._1.contains(x._2) )
@@ -74,6 +79,18 @@ class Box (
 
     def overlapPoints(points: Iterable[MutablePoint]): Iterable[MutablePoint] = {
         points.filter( p => contains(p) )
+    }
+
+    def overlappingRegion ( box: Box ): Box = {
+        val bounds = this.bounds.zip(box.bounds).map( boundPair => {
+            new BoundsInOneDimension( Math.max( boundPair._1.lower, boundPair._2.lower ), Math.min( boundPair._1.upper, boundPair._2.upper ) )
+        } )
+        new Box( bounds )
+    }
+
+    def addBox ( box: Box ): Unit = {
+        val newBounds = this.bounds.zip(box.bounds).map(boundPair => new BoundsInOneDimension(Math.min(boundPair._1.lower, boundPair._2.lower), Math.max(boundPair._1.upper, boundPair._2.upper)))
+        bounds = newBounds
     }
 
     private def findLongestDimensionAndItsIndex(): (BoundsInOneDimension, Int) = {
@@ -204,6 +221,33 @@ class BoxCalculator (val data: RDD[Point]) {
 
 }
 
+class SimpleBoxCalculator (val data: List[MutablePoint]) {
+
+    val numOfDimensions: Int = getNumOfDimensions(data)
+
+    private def getNumOfDimensions (data: List[MutablePoint]): Int = {
+        val pt = data(0)
+        pt.coordinates.length
+    }
+
+    def calculateBounds (): List[BoundsInOneDimension] = {
+        val minPoint = new Point (Array.fill (numOfDimensions)(Double.MaxValue))
+        val maxPoint = new Point (Array.fill (numOfDimensions)(Double.MinValue))
+        def fold (data: List[MutablePoint], zeroValue: Point, mapFunction: ((Double, Double)) => Double) = {
+            data.fold(zeroValue) {
+                (pt1, pt2) => {
+                    new Point (pt1.coordinates.zip (pt2.coordinates).map ( mapFunction ).toArray)
+                }
+            }
+        }
+        val mins = fold (data, minPoint, x => Math.min (x._1, x._2))
+        val maxs = fold (data, maxPoint, x => Math.max (x._1, x._2))
+
+        mins.coordinates.zip (maxs.coordinates).map ( x => new BoundsInOneDimension (x._1, x._2, true) ).toList
+    }
+
+}
+
 private object BoxCalculator {
 
     var maxTreeLevel = Math.round(Math.pow(Optics.numOfExecterNodes, 1.0/2)).toInt
@@ -239,7 +283,7 @@ private object BoxCalculator {
 
 }
 
-abstract class BoxTreeNodeBase [T <: BoxTreeNodeBase[_]] (val box: Box) extends Serializable {
+abstract class BoxTreeNodeBase [T <: BoxTreeNodeBase[_]] (var box: Box) extends Serializable {
   var children: List[T] = Nil
   var level = 0
 
@@ -273,11 +317,219 @@ class BoxTreeNode (box: Box) extends BoxTreeNodeBase[BoxTreeNode] (box) with Ser
 
 }
 
-class BoxTreeNodeWithPoints (
-    box: Box,
+case class BoxTreeNodeWithPoints (
+    _box: Box,
     val points: Iterable[Point] = Nil,
     val isLeaf: Boolean = false
-    ) extends BoxTreeNodeBase[BoxTreeNodeWithPoints](box) {
+) extends BoxTreeNodeBase[BoxTreeNodeWithPoints](_box) {
+
+    val insertionQueue = new Queue[BoxTreeNodeWithPoints]
+    val localInsertionQueue = new Queue[BoxTreeNodeWithPoints]
+
+    var temporary = false
+
+    def setTemporary (): Unit = {
+        temporary = true
+    }
+
+    def applyLocalInsertionQueue (): Unit = {
+        while ( this.localInsertionQueue.size > 0 ) {
+            val entry = this.localInsertionQueue.dequeue()
+            this.children :+= entry
+            this.box.addBox(entry.box)
+        }
+        this.children.foreach( child => {
+            child.applyLocalInsertionQueue()
+        } )
+    }
+
+    def getDescendantInsertionQueueSize (): Int = {
+        this.children match {
+            case Nil => this.insertionQueue.size
+            case _ => this.insertionQueue.size + this.children.map(_.getDescendantInsertionQueueSize()).reduce(_+_)
+        }
+    }
+
+    def getDescendantLocalInsertionQueueSize (): Int = {
+        this.children match {
+            case Nil => this.localInsertionQueue.size
+            case _ => this.localInsertionQueue.size + this.children.map(_.getDescendantLocalInsertionQueueSize()).reduce(_+_)
+        }
+    }
+
+    def entryNum (): Int = {
+        if ( this.children.size == 0 ) {
+            0
+        }
+        else {
+            this.children.size + this.children.map( child => child.entryNum() ).reduce( (a,b) => a+b )
+        }
+    }
+
+    def pointNum (): Int = {
+        if (this.points.size != 0) {
+            this.points.size
+        }
+        else {
+            this.children.map( child => child.pointNum() ).reduce( (a,b) => a+b )
+        }
+    }
+
+    def TreeInsertion (): List[BoxTreeNodeWithPoints] = {
+        if ( this.isLeaf ) {
+            None
+        }
+        else {
+            while ( !insertionQueue.isEmpty ) {
+                val entry = insertionQueue.dequeue()
+                //If e refers to a single element, then insert e into suitable child of current node
+                // skip
+                // If e refers to a subtree
+                if ( entry.getLevel() < this.getLevel() && areaCriterion(entry) ) {
+                    // Insert e into the insertion queue of the suitable child of current node
+                    this.children.minBy(_.enlargement(entry)).insertionQueue.enqueue(entry)
+                }
+                else if ( entry.getLevel() == this.getLevel() && overlapCriterion(entry) ) {
+                    //Insert e into the local insertion queue of current node
+                    this.localInsertionQueue.enqueue(entry)
+                    //this.children :+= entry
+                    //this.box.addBox(entry.box)
+                }
+                else {
+                    // Insert all the entries of e/subtree into the insertion queue of current node
+                    entry.children.foreach( child => {
+                        this.insertionQueue.enqueue(child)
+                    })
+                }
+            }
+            /*insertionQueue.foreach( e => {
+                //If e refers to a single element, then insert e into suitable child of current node
+                // skip
+                // If e refers to a subtree
+                if ( e.getLevel() < this.getLevel() && areaCriterion(e) ) {
+                    // Insert e into the insertion queue of the suitable child of current node
+                    this.children.minBy(_.enlargement(e)).insertionQueue.enqueue(e)
+                }
+                else if ( e.getLevel() == this.getLevel() && overlapCriterion(e) ) {
+                    //Insert e into the local insertion queue of current node
+                    this.localInsertionQueue.enqueue(e)
+                }
+                else {
+                    //Insert all the entries of e/subtree into the insertion queue of current node
+                    e.children.foreach(this.insertionQueue.enqueue(_))
+                }
+            } )*/
+            checkInsertionQueue()
+        }
+        multipleSplit()
+    }
+
+    def checkInsertionQueue (): Unit = {
+        children.foreach( child => {
+            if ( !child.insertionQueue.isEmpty ){
+                child.TreeInsertion()
+            }
+        } )
+    }
+
+    def areaCriterion ( subtree: BoxTreeNodeWithPoints ): Boolean = {
+        //println("areaCriterion is called")
+        val suitableChild = this.children.minBy(_.enlargement(subtree))
+        val thisEnlargement = suitableChild.enlargement(this)
+        val totalEnlargement = subtree.children match {
+            case Nil => subtree.points.map( entry => this.children.minBy(_.enlargement(entry)) ).zip(subtree.points).map(x => x._1.enlargement(x._2)).reduce((a,b) => a+b)
+            case _ => subtree.children.map( entry => this.children.minBy(_.enlargement(entry)) ).zip(subtree.children).map(node => node._1.enlargement(node._2)).reduce((a,b) => a+b)
+        }
+        //val totalEnlargement = subtree.children.map( entry => this.children.minBy(_.enlargement(entry)) ).zip(subtree.children).map(node => node._1.enlargement(node._2)).reduce((a,b) => a+b)
+        thisEnlargement <= totalEnlargement
+    }
+
+    def overlapCriterion ( subtree: BoxTreeNodeWithPoints ): Boolean = {
+        /* subtree を this に挿入した場合の，オーバーラップ領域の拡大するサイズ */
+        if ( !this.children.isEmpty ) {
+            val copiedThis1 = this.copyNode()
+            copiedThis1.children :+= subtree
+            val overlapEnlargement = copiedThis1.totalOverlappingVolume()
+            val copiedThis2 = this.copyNode()
+            subtree.children.foreach( child => {
+                copiedThis2.children.minBy(_.enlargement(child)).children :+= child
+                // apply enlargement for the parent node of children
+                copiedThis2.children.minBy(_.enlargement(child)).box.addBox(child.box)
+            } )
+            val childrenOverlapEnlargement = copiedThis1.totalOverlappingVolume()
+            overlapEnlargement <= childrenOverlapEnlargement
+        }
+        else {
+            true
+        }
+    }
+
+    def copyNode (): BoxTreeNodeWithPoints = {
+        val newNode = this.copy()
+        newNode.children = this.children.map(x => x.copyNode())
+        newNode
+    }
+
+    /* returns area enlargement to include 'that' */
+    def enlargement ( that: BoxTreeNodeWithPoints ): Double = {
+        val thisVolume = this.box.bounds.map(_.length).reduce((a,b) => a*b)
+        //val enlargedVolume = this.box.bounds.zip(that.box.bounds).map(a => Math.min(a._1.lower, a._2.lower) - Math.max(a._1.upper, a._2.upper)).reduce((a,b) => a*b)
+        val enlargedVolume = this.box.bounds.zip(that.box.bounds).map(a => Math.max(a._1.upper, a._2.upper) - Math.min(a._1.lower, a._2.lower)).reduce((a,b) => a*b)
+        val enlargement = enlargedVolume - thisVolume
+        assert( enlargement >= 0, "something wrong" )
+        enlargement
+    }
+
+    def enlargement ( that: Point ): Double = {
+        val thisVolume = this.box.bounds.map(_.length).reduce((a,b) => a*b)
+        //val enlargedVolume = this.box.bounds.zip(that.coordinates).map(a => Math.min(a._1.lower, a._2.lower) - Math.max(a._1.upper, a._2.upper)).reduce((a,b) => a*b)
+        val enlargedVolume = this.box.bounds.zip(that.coordinates).map(a => Math.max(a._1.upper, a._2) - Math.min(a._1.lower, a._2)).reduce((a,b) => a*b)
+        val enlargement = enlargedVolume - thisVolume
+        assert( enlargement >= 0, "something wrong" )
+        enlargement
+    }
+
+    /* returns the volume of overlapping region */
+    def totalOverlappingVolume (): Double = {
+        /* calculate pairwise overlapping region */
+        val overlappingVolumes = this.children.combinations(2).filter(comb => comb(0).box.overlapsWith(comb(1).box)).map(comb => comb(0).overlappingVolume(comb(1)))
+        //overlappingRegionの体積出す→さらにoverlappingRegionを出して引く?
+        if ( overlappingVolumes.isEmpty ) {
+            0.0
+        }
+        else {
+            overlappingVolumes.reduce((a,b) => a*b)
+        }
+    }
+
+    def overlappingVolume ( node: BoxTreeNodeWithPoints ): Double = {
+        this.box.bounds.zip(node.box.bounds).map( boundPair => {
+            if ( (boundPair._1.upper <= boundPair._2.lower || boundPair._1.lower >= boundPair._2.upper) ) {
+                0
+            }
+            else {
+                Math.min( boundPair._1.upper, boundPair._2.upper ) - Math.max( boundPair._1.lower, boundPair._2.lower )
+            }
+        } )
+        .reduce( (a,b) => a*b )
+    }
+
+    def multipleSplit (): List[BoxTreeNodeWithPoints] = {
+        /* Execute the multiple split for C.
+            If new sibling nodes have been created because of splits:
+            Insert suitable entries for them into the local insertion queue of the parent of C */
+        List(this)
+    }
+
+    def getLevel (): Int = {
+        var currentNode = this
+        var result = 0
+        while( !currentNode.isLeaf ) {
+            currentNode = currentNode.children(0)
+            result = result + 1
+        }
+        result
+    }
 
 }
 

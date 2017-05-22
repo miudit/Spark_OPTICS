@@ -5,15 +5,67 @@ import scala.collection.immutable.Vector
 import scala.collection.mutable.{ListBuffer, ArrayBuffer}
 import scala.collection.parallel.ParIterable
 import scala.util.control.Breaks.{break, breakable}
+import scala.collection.mutable.Queue
+import scala.util.Random
 
 class PartitionIndexer (
-    val partitionBox: Box,
-    val points: Iterable[MutablePoint],
+    var partitionBox: Box,
+    var points: Iterable[MutablePoint],
     val epsilon: Double,
     val minPts: Int,
-    val partitionIndex: Int = -1 ) extends DistanceCalculator with Serializable {
+    var partitionIndex: Int = -1 ) extends DistanceCalculator with Serializable {
 
-    val boxesTree = PartitionIndexer.buildRTree(partitionBox, points, epsilon, minPts)
+    var boxesTree = PartitionIndexer.buildRTree(partitionBox, points, epsilon, minPts)
+
+    var prevBox = partitionBox
+    var prevPoints = points
+
+    def addTempBox (box: Box): Unit = {
+        prevBox = partitionBox
+        partitionBox.addBox(box)
+    }
+
+    def addTempPoints (newpoints: Iterable[MutablePoint]): Unit = {
+        prevPoints = points
+        points = points ++ newpoints
+    }
+
+    def removeTempNode (): Unit = {
+        boxesTree.children = boxesTree.children.filter(!_.temporary)
+        points = prevPoints
+        partitionBox = prevBox
+        boxesTree.box = partitionBox
+    }
+
+    def mergeIndexers ( givingTree: PartitionIndexer ): PartitionIndexer = {
+        givingTree.boxesTree.children.foreach(x => this.boxesTree.insertionQueue.enqueue(x))
+        val siblingNodes = this.boxesTree.TreeInsertion()
+        /*
+            While there are new nodes that have been created because
+            of splitting the root of the receiving tree:
+                Create a new root for the receiving tree.
+                Insert the old root as well as the new nodes into
+                the local insertion queue of the new root.
+                Execute the tree insertion for the new root.
+
+            SomeFunc()
+        */
+
+        this.boxesTree.applyLocalInsertionQueue()
+        this
+    }
+
+    def simpleMerge ( givingTree: PartitionIndexer ): PartitionIndexer = {
+        this.boxesTree.box.addBox( givingTree.boxesTree.box )
+        val newBox = this.boxesTree.box
+        val newPoints = this.points ++ givingTree.points
+        val newRoot = new BoxTreeNodeWithPoints(newBox, newPoints, false)
+        newRoot.children = newRoot.children :+ this.boxesTree
+        newRoot.children = newRoot.children :+ givingTree.boxesTree
+        this.boxesTree = newRoot
+        this.points = newPoints
+        this
+    }
 
     def findNeighbors (point: Point, onlyUnprocessed: Boolean): Iterable[Point] = {
         val queryCircleBounds = point.coordinates.map(
