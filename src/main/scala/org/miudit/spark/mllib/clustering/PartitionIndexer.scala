@@ -20,6 +20,10 @@ class PartitionIndexer (
     var prevBox = partitionBox
     var prevPoints = points
 
+    def resetProcessedFlags (): Unit = {
+        boxesTree.resetProcessedFlags()
+    }
+
     def addTempBox (box: Box): Unit = {
         prevBox = partitionBox
         partitionBox.addBox(box)

@@ -328,6 +328,14 @@ case class BoxTreeNodeWithPoints (
 
     var temporary = false
 
+    def resetProcessedFlags (): Unit = {
+        children.foreach(_.points.foreach(_.processed = false))
+        if ( isLeaf )
+            None
+        else
+            children.foreach(_.resetProcessedFlags())
+    }
+
     def setTemporary (): Unit = {
         temporary = true
     }
