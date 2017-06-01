@@ -450,9 +450,10 @@ class Optics private (
         breakable(
             for ( i <- 0 to clusterOrdering.size ) {
                 val p = clusterOrdering(i)
-                println("p = %s".format(p))
                 if ( !p.isAffected && !p.processed ) {
-                    processNonAffectedPoint(points1, points2, p, indexer, priorityQueue, newClusterOrdering)
+                    //processNonAffectedPoint(points1, points2, p, indexer, priorityQueue, newClusterOrdering)
+                    p.processed = true
+                    newClusterOrdering.append(p)
                 }
                 if ( clusterOrdering.filter(p => !p.isAffected && !p.processed).size == 0 )
                     break
