@@ -447,7 +447,8 @@ class Optics private (
         assert( clusterOrdering.filter(p => p.isAffected && !p.processed).size == 0, "AFFECTED POINTS REMAINING" )
 
         // process for all unprocessed unaffected points if exists
-        breakable(
+        newClusterOrdering ++= clusterOrdering.filter(p => !p.isAffected && !p.processed)
+        /*breakable(
             for ( i <- 0 to clusterOrdering.size ) {
                 val p = clusterOrdering(i)
                 if ( !p.isAffected && !p.processed ) {
@@ -458,7 +459,7 @@ class Optics private (
                 if ( clusterOrdering.filter(p => !p.isAffected && !p.processed).size == 0 )
                     break
             }
-        )
+        )*/
 
     }
 
