@@ -326,22 +326,48 @@ class Optics private (
 
         markAffectedPoints(indexer1.boxesTree, indexer2.boxesTree)
 
+        println("MARKING FINISHED")
+
+        println("POINTS1 SIZE = %s".format(points1.size))
+
         // reflect affected points
-        val markedPoints1 = points1.map( p => {
-            val pointInIndexer1 = indexer1.points.find( x => x.pointId == p.pointId )
-            assert( pointInIndexer1.isDefined, "Something wrong" )
-            p.isAffected = pointInIndexer1.get.isAffected
-            p
+        indexer1.points.filter(_.isAffected).foreach( p => {
+            val pointInPoints1 = points1.find( x => x.pointId == p.pointId )
+            if ( pointInPoints1.isDefined ){
+                pointInPoints1.get.isAffected = p.isAffected
+            }
         })
-        val markedPoints2 = points2.map( p => {
-            val pointInIndexer2 = indexer2.points.find( x => x.pointId == p.pointId )
-            assert( pointInIndexer2.isDefined, "Something wrong" )
-            p.isAffected = pointInIndexer2.get.isAffected
-            p
+        val markedPoints1 = points1
+
+        indexer2.points.filter(_.isAffected).foreach( p => {
+            val pointInPoints2 = points2.find( x => x.pointId == p.pointId )
+            if ( pointInPoints2.isDefined ){
+                pointInPoints2.get.isAffected = p.isAffected
+            }
         })
+        val markedPoints2 = points2
+
+        println("AFFECTED SIZE 1 = %s".format(markedPoints1.filter(_.isAffected).size))
+        println("AFFECTED SIZE 2 = %s".format(markedPoints2.filter(_.isAffected).size))
 
         //affectedをco1, co2にも反映
-        val markedCO1 = co1.map( p => {
+        indexer1.points.filter(_.isAffected).foreach( p => {
+            val pointInCO1 = co1.find( x => x.pointId == p.pointId )
+            if ( pointInCO1.isDefined ){
+                pointInCO1.get.isAffected = p.isAffected
+            }
+        })
+        val markedCO1 = co1
+
+        indexer2.points.filter(_.isAffected).foreach( p => {
+            val pointInCO2 = co2.find( x => x.pointId == p.pointId )
+            if ( pointInCO2.isDefined ){
+                pointInCO2.get.isAffected = p.isAffected
+            }
+        })
+        val markedCO2 = co2
+
+        /*val markedCO1 = co1.map( p => {
             val pointInIndexer1 = indexer1.points.find( x => x.pointId == p.pointId )
             assert( pointInIndexer1.isDefined, "Something wrong2" )
             p.isAffected = pointInIndexer1.get.isAffected
@@ -352,7 +378,11 @@ class Optics private (
             assert( pointInIndexer2.isDefined, "Something wrong2" )
             p.isAffected = pointInIndexer2.get.isAffected
             p
-        })
+        })*/
+
+        println("REFLECT CO FINISHED")
+        println("AFFECTED SIZE CO1 = %s".format(markedCO1.filter(_.isAffected).size))
+        println("AFFECTED SIZE CO2 = %s".format(markedCO2.filter(_.isAffected).size))
 
         var newClusterOrdering = new ClusterOrdering()
 
@@ -420,6 +450,7 @@ class Optics private (
         breakable(
             for ( i <- 0 to clusterOrdering.size ) {
                 val p = clusterOrdering(i)
+                println("p = %s".format(p))
                 if ( !p.isAffected && !p.processed ) {
                     processNonAffectedPoint(points1, points2, p, indexer, priorityQueue, newClusterOrdering)
                 }
