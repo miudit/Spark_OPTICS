@@ -259,7 +259,6 @@ class Optics private (
                 co._2._3.partitionIndex = co._1
                 co._2._3
             } )
-            indexers.foreach( indexer => println( "partitionIndex = %s".format(indexer.partitionIndex) )  )
 
             val broadcastIndexers = partialClusters.sparkContext.broadcast(indexers)
 
@@ -309,24 +308,15 @@ class Optics private (
                     indexer1.boxesTree.children = indexer1.boxesTree.children :+ newNode1
                     indexer2.boxesTree.children = indexer2.boxesTree.children :+ newNode2
 
-                    val mergeResult = merge(p1._1, p2._1, indexer1, indexer2)
-                    //val mergeResult = p1._1 ++ p2._1
+                    //val mergeResult = merge(p1._1, p2._1, indexer1, indexer2)
+                    val mergeResult = p1._1 ++ p2._1
+		    mergeResult.foreach(_.isAffected = false)
                     val newBox = allBoxes.find( _.mergeId == p1._2.mergeId/10 ).get
 
                     indexer1.removeTempNode()
                     indexer2.removeTempNode()
 
-                    val r = new Random
-                    val hash = r.nextInt()
-                    val indexer1_bound1 = indexer1.boxesTree.box.bounds(0)
-                    val indexer1_bound2 = indexer1.boxesTree.box.bounds(1)
-                    val indexer2_bound1 = indexer2.boxesTree.box.bounds(0)
-                    val indexer2_bound2 = indexer2.boxesTree.box.bounds(1)
-                    println("%s indexer1 (mergeId = %s) box num = %s pointnum = %s height = %s bound = x:(%s,%s), y:(%s,%s)".format(hash, p1._2.mergeId, indexer1.boxesTree.entryNum(), indexer1.boxesTree.pointNum(), indexer1.boxesTree.getLevel(), indexer1_bound1.lower, indexer1_bound1.upper, indexer1_bound2.lower, indexer1_bound2.upper))
-                    println("%s indexer2 (mergeId = %s) box num = %s pointnum = %s height = %s bound = x:(%s,%s), y:(%s,%s)".format(hash, p2._2.mergeId, indexer2.boxesTree.entryNum(), indexer2.boxesTree.pointNum(), indexer1.boxesTree.getLevel(), indexer2_bound1.lower, indexer2_bound1.upper, indexer2_bound2.lower, indexer2_bound2.upper))
-                    //val mergedIndexer = indexer1.mergeIndexers(indexer2)
                     val mergedIndexer = indexer1.simpleMerge(indexer2)
-                    println("%s mergedIndexer (mergeId = %s and %s) box num = %s  pointnum = %s  height = %s".format(hash, p1._2.mergeId, p2._2.mergeId, mergedIndexer.boxesTree.entryNum(), mergedIndexer.boxesTree.pointNum(), mergedIndexer.boxesTree.getLevel()))
 
                     ( mergeResult, newBox, mergedIndexer )
                 },

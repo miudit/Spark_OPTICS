@@ -11,7 +11,7 @@ import numpy as np
 
 if __name__ == "__main__":
 
-    file_write = open("data_10K_2d.csv", "w")
+    file_write = open("data_1M_4d.csv", "w")
 
     """
     for i in range(8):
@@ -30,9 +30,9 @@ if __name__ == "__main__":
             file_write.write("{0:.3f}".format(a) + ',' + "{0:.3f}".format(b) + '\n')
     """
 
-    num_of_attributes = 2
+    num_of_attributes = 4
     num_of_class = 64
-    data_size = 10000
+    data_size = 1000000
     size_per_class = data_size / num_of_class
     centers = np.random.rand(num_of_class, num_of_attributes) * 800 + 100
     variation = 10

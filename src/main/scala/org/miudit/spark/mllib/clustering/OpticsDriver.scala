@@ -13,7 +13,8 @@ object OpticsDriver {
         val minPts = args(2).toInt
         Optics.numOfExecterNodes = args(3).toInt
         Optics.maxEntriesForRTree = args(4).toInt
-        val conf = new SparkConf().setAppName("OPTICS")
+        //val conf = new SparkConf().setAppName("OPTICS")
+        val conf = new SparkConf()
         val sc = new SparkContext(conf)
         sc.setLogLevel("WARN")
         val inputCSV = sc.textFile(inputFile, 2).cache()
@@ -33,5 +34,6 @@ object OpticsDriver {
                 println("RESULT SIZE = %s".format(co._1.size))
             }
         )
+	println("HOGEHOGEOKK")
     }
 }
