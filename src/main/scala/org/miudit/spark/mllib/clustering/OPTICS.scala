@@ -66,7 +66,7 @@ class Optics private (
                 val partitionIndexer = indexers.find( _.partitionIndex == partitionIndex ).get
                 val partialResult = partialClustering(it, partitionBoundingBox, partitionIndexer)
 
-                Vector( (partitionBoundingBox.mergeId, (partialResult, partitionBoundingBox, partitionIndexer)) ).toIterator
+                Vector( (partitionBoundingBox.mergeId, (partialResult, partitionBoundingBox, partitionIndexer, partitionIndexer)) ).toIterator
             },
             preservesPartitioning = true
         )
@@ -240,7 +240,7 @@ class Optics private (
     }
 
     private def mergeClusters (
-        partialClusters: RDD[(Int, (ClusterOrdering, Box, PartitionIndexer))],
+        partialClusters: RDD[(Int, (ClusterOrdering, Box, PartitionIndexer, PartitionIndexer))],
         boxes: Iterable[Box],
         allBoxes: Iterable[Box] ): RDD[ClusterOrdering] = {
 
@@ -256,41 +256,47 @@ class Optics private (
 
             /* partialClustersのPartitionIndexerのリストを作成するように変更 */
             val indexers = partialCOArray.map( co => {
-                co._2._3.partitionIndex = co._1
-                (co._1, co._2._3)
+                val indexer1 = co._2._3
+                val indexer2 = co._2._4
+                if ( indexer1.partitionIndex == indexer2.partitionIndex ) {
+                    indexer1.partitionIndex = co._1
+                    indexer1
+                }
+                else {
+                    indexer1.removeTempNode()
+                    indexer2.removeTempNode()
+                    val pointsOfIndexer1 = indexer1.points
+                    val pointsOfIndexer2 = indexer2.points
+                    val expandedBox1 = indexer1.boxesTree.box.expand(epsilon)
+                    val expandedBox2 = indexer2.boxesTree.box.expand(epsilon)
+                    val expandedPoints1 = expandedBox1.overlapPoints(pointsOfIndexer2).toList
+                    val expandedPoints2 = expandedBox2.overlapPoints(pointsOfIndexer1).toList
+                    if ( expandedPoints1.size != 0 ) {
+                        val boxcalculator1 = new SimpleBoxCalculator(expandedPoints1)
+                        val newBox1 = new Box(boxcalculator1.calculateBounds().toArray)
+                        val newNode1 = new BoxTreeNodeWithPoints(newBox1, expandedPoints1, true)
+                        newNode1.setTemporary()
+                        indexer1.boxesTree.box.addBox(newBox1)
+                        indexer1.addTempBox(newBox1)
+                        indexer1.addTempPoints(expandedPoints1)
+                        indexer1.boxesTree.children = indexer1.boxesTree.children :+ newNode1
+                    }
+                    if ( expandedPoints2.size != 0 ) {
+                        val boxcalculator2 = new SimpleBoxCalculator(expandedPoints2)
+                        val newBox2 = new Box(boxcalculator2.calculateBounds().toArray)
+                        val newNode2 = new BoxTreeNodeWithPoints(newBox2, expandedPoints2, true)
+                        newNode2.setTemporary()
+                        indexer2.boxesTree.box.addBox(newBox2)
+                        indexer2.addTempBox(newBox2)
+                        indexer2.addTempPoints(expandedPoints2)
+                        indexer2.boxesTree.children = indexer2.boxesTree.children :+ newNode2
+                    }
+
+                    val mergedIndexer = indexer1.simpleMerge(indexer2)
+                    mergedIndexer.partitionIndex = co._1
+                    mergedIndexer
+                }
             } )
-            .combinations(2).toList
-            .filter( pair => {
-                pair(0)._1/10 == pair(1)._1/10
-            })
-            .map( pair => {
-                val indexer1 = pair(0)._2
-                val indexer2 = pair(1)._2
-                val pointsOfIndexer1 = indexer1.points
-                val pointsOfIndexer2 = indexer2.points
-                val expandedBox1 = indexer1.boxesTree.box.expand(epsilon)
-                val expandedBox2 = indexer2.boxesTree.box.expand(epsilon)
-                val expandedPoints1 = expandedBox1.overlapPoints(pointsOfIndexer2).toList
-                val expandedPoints2 = expandedBox2.overlapPoints(pointsOfIndexer1).toList
-                val boxcalculator1 = new SimpleBoxCalculator(expandedPoints1)
-                val boxcalculator2 = new SimpleBoxCalculator(expandedPoints2)
-                val newBox1 = new Box(boxcalculator1.calculateBounds().toArray)
-                val newBox2 = new Box(boxcalculator2.calculateBounds().toArray)
-                val newNode1 = new BoxTreeNodeWithPoints(newBox1, expandedPoints1, true)
-                newNode1.setTemporary()
-                val newNode2 = new BoxTreeNodeWithPoints(newBox2, expandedPoints2, true)
-                newNode2.setTemporary()
-                indexer1.boxesTree.box.addBox(newBox1)
-                indexer2.boxesTree.box.addBox(newBox2)
-                indexer1.addTempBox(newBox1)
-                indexer2.addTempBox(newBox2)
-                indexer1.addTempPoints(expandedPoints1)
-                indexer2.addTempPoints(expandedPoints2)
-                indexer1.boxesTree.children = indexer1.boxesTree.children :+ newNode1
-                indexer2.boxesTree.children = indexer2.boxesTree.children :+ newNode2
-                List(indexer1, indexer2)
-            }).flatten
-            indexers.foreach( indexer => println( "partitionIndex = %s".format(indexer.partitionIndex) )  )
 
             val broadcastIndexers = partialClusters.sparkContext.broadcast(indexers)
 
@@ -302,7 +308,7 @@ class Optics private (
 
                     val temp = tempList.map(
                         p => {
-                            (p._1/10, (p._2._1, p._2._2, p._2._3))
+                            (p._1/10, (p._2._1, p._2._2, p._2._3, p._2._4))
                         }
                     ).toIterator
                     temp
@@ -313,44 +319,11 @@ class Optics private (
                     val indexer1 = broadcastIndexers.value.find( _.partitionIndex == p1._2.mergeId ).get
                     val indexer2 = broadcastIndexers.value.find( _.partitionIndex == p2._2.mergeId ).get
 
-                    /*
-                    * expand indexer1 and indexer2
-                    * inserted new nodes have some flag for removing when merging indexers
-                    */
-                    /*val pointsOfIndexer1 = indexer1.points
-                    val pointsOfIndexer2 = indexer2.points
-                    val expandedBox1 = indexer1.boxesTree.box.expand(epsilon)
-                    val expandedBox2 = indexer2.boxesTree.box.expand(epsilon)
-                    val expandedPoints1 = expandedBox1.overlapPoints(pointsOfIndexer2).toList
-                    val expandedPoints2 = expandedBox2.overlapPoints(pointsOfIndexer1).toList
-                    val boxcalculator1 = new SimpleBoxCalculator(expandedPoints1)
-                    val boxcalculator2 = new SimpleBoxCalculator(expandedPoints2)
-                    val newBox1 = new Box(boxcalculator1.calculateBounds().toArray)
-                    val newBox2 = new Box(boxcalculator2.calculateBounds().toArray)
-                    val newNode1 = new BoxTreeNodeWithPoints(newBox1, expandedPoints1, true)
-                    newNode1.setTemporary()
-                    val newNode2 = new BoxTreeNodeWithPoints(newBox2, expandedPoints2, true)
-                    newNode2.setTemporary()
-                    indexer1.boxesTree.box.addBox(newBox1)
-                    indexer2.boxesTree.box.addBox(newBox2)
-                    indexer1.addTempBox(newBox1)
-                    indexer2.addTempBox(newBox2)
-                    indexer1.addTempPoints(expandedPoints1)
-                    indexer2.addTempPoints(expandedPoints2)
-                    indexer1.boxesTree.children = indexer1.boxesTree.children :+ newNode1
-                    indexer2.boxesTree.children = indexer2.boxesTree.children :+ newNode2*/
-
                     //val mergeResult = merge(p1._1, p2._1, indexer1, indexer2)
                     val mergeResult = p1._1 ++ p2._1
                     val newBox = allBoxes.find( _.mergeId == p1._2.mergeId/10 ).get
 
-                    indexer1.removeTempNode()
-                    indexer2.removeTempNode()
-
-                    //val mergedIndexer = indexer1.mergeIndexers(indexer2)
-                    val mergedIndexer = indexer1.simpleMerge(indexer2)
-
-                    ( mergeResult, newBox, mergedIndexer )
+                    ( mergeResult, newBox, indexer1, indexer2 )
                 },
                 partialClusterOrderings.getNumPartitions/2
             ).cache()
