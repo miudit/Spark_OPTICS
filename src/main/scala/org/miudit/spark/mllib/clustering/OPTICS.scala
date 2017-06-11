@@ -290,7 +290,6 @@ class Optics private (
                 indexer2.boxesTree.children = indexer2.boxesTree.children :+ newNode2
                 List(indexer1, indexer2)
             }).flatten
-            indexers.foreach( indexer => println( "partitionIndex = %s".format(indexer.partitionIndex) )  )
 
             val broadcastIndexers = partialClusters.sparkContext.broadcast(indexers)
 
