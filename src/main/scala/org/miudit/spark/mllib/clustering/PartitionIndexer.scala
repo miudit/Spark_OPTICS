@@ -66,8 +66,8 @@ class PartitionIndexer (
         val newRoot = new BoxTreeNodeWithPoints(newBox, newPoints, false)
         newRoot.children = newRoot.children :+ this.boxesTree
         newRoot.children = newRoot.children :+ givingTree.boxesTree
-        this.boxesTree = newRoot
-        this.points = newPoints
+        //this.boxesTree = newRoot
+        //this.points = newPoints
         this
     }
 

@@ -258,15 +258,17 @@ class Optics private (
             val startTime = System.nanoTime()
 
             /* partialClustersのPartitionIndexerのリストを作成するように変更 */
-            val indexers = partialCOArray.map( co => {
+            val indexers_tmp = partialCOArray.map( co => {
                 val indexer1 = co._2._3
                 val indexer2 = co._2._4
+                indexer1.removeTempNode()
+                indexer2.removeTempNode()
                 if ( indexer1.partitionIndex == indexer2.partitionIndex ) {
                     indexer1.partitionIndex = co._1
                     indexer1
                 }
                 else {
-                    indexer1.removeTempNode()
+                    /*indexer1.removeTempNode()
                     indexer2.removeTempNode()
                     val pointsOfIndexer1 = indexer1.points
                     val pointsOfIndexer2 = indexer2.points
@@ -293,14 +295,36 @@ class Optics private (
                         indexer2.addTempBox(newBox2)
                         indexer2.addTempPoints(expandedPoints2)
                         indexer2.boxesTree.children = indexer2.boxesTree.children :+ newNode2
-                    }
+                    }*/
 
                     val mergedIndexer = indexer1.simpleMerge(indexer2)
                     mergedIndexer.partitionIndex = co._1
                     mergedIndexer
                 }
-                indexer1.partitionIndex = co._1
-                indexer1
+            } )
+
+            val indexers = indexers_tmp.map( indexer => {
+                val expandedBox = indexer.partitionBox.expand(epsilon)
+                val mergeId = indexer.partitionIndex
+                val points1 = indexer.points
+                val points2 = broadcastCO.value
+                    .find( x => x._1/10 == mergeId/10 && x._1 != mergeId ).get._2._1
+                    .map( p => { p.processed = false; p} )
+                val expandedPoints1 = points1 ++ expandedBox.overlapPoints(points2)
+                if ( expandedPoints1.size != 0 ) {
+                    val boxcalculator1 = new SimpleBoxCalculator(expandedPoints1.toList)
+                    val newBox1 = new Box(boxcalculator1.calculateBounds().toArray)
+                    val newNode1 = new BoxTreeNodeWithPoints(newBox1, expandedPoints1, true)
+                    newNode1.setTemporary()
+                    indexer.boxesTree.box.addBox(newBox1)
+                    indexer.addTempBox(newBox1)
+                    indexer.addTempPoints(expandedPoints1)
+                    indexer.boxesTree.children = indexer.boxesTree.children :+ newNode1
+                    indexer
+                }
+                else {
+                    indexer
+                }
             } )
 
             val broadcastIndexers = partialClusters.sparkContext.broadcast(indexers)
