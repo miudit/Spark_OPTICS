@@ -74,6 +74,7 @@ object PartitionIndexer extends DistanceCalculator {
             ).toList
             nodes = newNodes
         }
+        println("AAAAAAAAAAAA")
         val root = new BoxTreeNodeWithPoints(boundingBox)
         root.children = nodes
         root

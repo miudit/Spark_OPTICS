@@ -242,6 +242,9 @@ class Optics private (
 
             val broadcastCO = partialClusterOrderings.sparkContext.broadcast(partialCOArray)
 
+            println("Measure Begin indexer num = %s".format(partialCOArray.size))
+            val startTime = System.nanoTime()
+
             val indexers = partialCOArray.map(
                 co => {
                     val expandedBox = co._2._2.expand(epsilon)
@@ -258,6 +261,9 @@ class Optics private (
             .map( x => new PartitionIndexer(x._1, x._2, epsilon, minPts, x._3) )
 
             val broadcastIndexers = partialClusters.sparkContext.broadcast(indexers)
+
+            val endTime = System.nanoTime()
+            println("ELAPSED TIME = %s ms, indexer num = %s".format( (endTime - startTime) / 1000000.0, indexers.size ))
 
             /*val indexerInfo = partialCOArray.map(
                 co => {
