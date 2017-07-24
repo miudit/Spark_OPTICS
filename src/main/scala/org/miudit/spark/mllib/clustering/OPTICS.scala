@@ -254,6 +254,9 @@ class Optics private (
 
             val broadcastCO = partialClusterOrderings.sparkContext.broadcast(partialCOArray)
 
+            println("Measure Begin indexer num = %s".format(partialCOArray.size))
+            val startTime = System.nanoTime()
+
             /* partialClustersのPartitionIndexerのリストを作成するように変更 */
             val indexers = partialCOArray.map( co => {
                 val indexer1 = co._2._3
@@ -296,9 +299,14 @@ class Optics private (
                     mergedIndexer.partitionIndex = co._1
                     mergedIndexer
                 }
+                indexer1.partitionIndex = co._1
+                indexer1
             } )
 
             val broadcastIndexers = partialClusters.sparkContext.broadcast(indexers)
+
+            val endTime = System.nanoTime()
+            println("ELAPSED TIME = %s ms, indexer num = %s".format( (endTime - startTime) / 1000000.0, indexers.size ))
 
             partialClusterOrderings = partialClusterOrderings.mapPartitionsWithIndex(
                 (index, iterator) => {
@@ -321,7 +329,7 @@ class Optics private (
 
                     //val mergeResult = merge(p1._1, p2._1, indexer1, indexer2)
                     val mergeResult = p1._1 ++ p2._1
-		    
+
 	            mergeResult.foreach(_.isAffected = false)
                     val newBox = allBoxes.find( _.mergeId == p1._2.mergeId/10 ).get
 
